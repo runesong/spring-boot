@@ -18,6 +18,7 @@ package org.springframework.boot.test.autoconfigure.web.servlet;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
+import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
@@ -27,6 +28,7 @@ import org.openqa.selenium.WebDriver;
 
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.properties.PropertyMapping;
+import org.springframework.boot.test.autoconfigure.properties.SkipPropertyMapping;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -37,14 +39,13 @@ import org.springframework.test.web.servlet.MvcResult;
  * @author Phillip Webb
  * @since 1.4.0
  * @see MockMvcAutoConfiguration
- * @see SpringBootMockMvcConfigurer
+ * @see SpringBootMockMvcBuilderCustomizer
  */
-@Documented
-@Retention(RetentionPolicy.RUNTIME)
 @Target({ ElementType.TYPE, ElementType.METHOD })
-@ImportAutoConfiguration({ MockMvcAutoConfiguration.class,
-		MockMvcWebClientAutoConfiguration.class,
-		MockMvcWebDriverAutoConfiguration.class })
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+@ImportAutoConfiguration
 @PropertyMapping("spring.test.mockmvc")
 public @interface AutoConfigureMockMvc {
 
@@ -56,11 +57,17 @@ public @interface AutoConfigureMockMvc {
 	boolean addFilters() default true;
 
 	/**
-	 * If {@link MvcResult} information should always be printed after each MockMVC
-	 * invocation. Defaults to {@code true}.
-	 * @return if result information is always printed
+	 * How {@link MvcResult} information should be printed after each MockMVC invocation.
+	 * @return how information is printed
 	 */
-	boolean alwaysPrint() default true;
+	@PropertyMapping(skip = SkipPropertyMapping.ON_DEFAULT_VALUE)
+	MockMvcPrint print() default MockMvcPrint.DEFAULT;
+
+	/**
+	 * If {@link MvcResult} information should be printed only if the test fails.
+	 * @return {@code true} if printing only occurs on failure
+	 */
+	boolean printOnlyOnFailure() default true;
 
 	/**
 	 * If a {@link WebClient} should be auto-configured when HtmlUnit is on the classpath.
@@ -77,5 +84,12 @@ public @interface AutoConfigureMockMvc {
 	 */
 	@PropertyMapping("webdriver.enabled")
 	boolean webDriverEnabled() default true;
+
+	/**
+	 * If Spring Security's {@link MockMvc} support should be auto-configured when it is
+	 * on the classpath. Defaults to {@code true}.
+	 * @return if Spring Security's MockMvc support is auto-configured
+	 */
+	boolean secure() default true;
 
 }

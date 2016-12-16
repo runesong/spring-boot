@@ -20,6 +20,7 @@ import java.util.Map;
 
 import javax.sql.DataSource;
 
+import io.searchbox.client.JestClient;
 import org.junit.After;
 import org.junit.Test;
 
@@ -29,6 +30,7 @@ import org.springframework.boot.actuate.health.CouchbaseHealthIndicator;
 import org.springframework.boot.actuate.health.DataSourceHealthIndicator;
 import org.springframework.boot.actuate.health.DiskSpaceHealthIndicator;
 import org.springframework.boot.actuate.health.ElasticsearchHealthIndicator;
+import org.springframework.boot.actuate.health.ElasticsearchJestHealthIndicator;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.actuate.health.JmsHealthIndicator;
@@ -42,6 +44,7 @@ import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.boot.autoconfigure.elasticsearch.jest.JestAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceBuilder;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.autoconfigure.jdbc.EmbeddedDataSourceConfiguration;
@@ -391,13 +394,13 @@ public class HealthIndicatorAutoConfigurationTests {
 	}
 
 	@Test
-	public void elasticSearchHealthIndicator() {
+	public void elasticsearchHealthIndicator() {
 		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.data.elasticsearch.properties.path.data:target/data",
-				"spring.data.elasticsearch.properties.path.logs:target/logs",
+				"spring.data.elasticsearch.properties.path.home:target",
 				"management.health.diskspace.enabled:false");
-		this.context.register(ElasticsearchAutoConfiguration.class,
-				ManagementServerProperties.class, HealthIndicatorAutoConfiguration.class);
+		this.context.register(JestClientConfiguration.class, JestAutoConfiguration.class,
+				ElasticsearchAutoConfiguration.class, ManagementServerProperties.class,
+				HealthIndicatorAutoConfiguration.class);
 		this.context.refresh();
 
 		Map<String, HealthIndicator> beans = this.context
@@ -408,14 +411,29 @@ public class HealthIndicatorAutoConfigurationTests {
 	}
 
 	@Test
-	public void notElasticSearchHealthIndicator() {
+	public void elasticsearchJestHealthIndicator() {
+		EnvironmentTestUtils.addEnvironment(this.context,
+				"management.health.diskspace.enabled:false");
+		this.context.register(JestClientConfiguration.class, JestAutoConfiguration.class,
+				ManagementServerProperties.class, HealthIndicatorAutoConfiguration.class);
+		this.context.refresh();
+
+		Map<String, HealthIndicator> beans = this.context
+				.getBeansOfType(HealthIndicator.class);
+		assertThat(beans).hasSize(1);
+		assertThat(beans.values().iterator().next().getClass())
+				.isEqualTo(ElasticsearchJestHealthIndicator.class);
+	}
+
+	@Test
+	public void notElasticsearchHealthIndicator() {
 		EnvironmentTestUtils.addEnvironment(this.context,
 				"management.health.elasticsearch.enabled:false",
-				"spring.data.elasticsearch.properties.path.data:target/data",
-				"spring.data.elasticsearch.properties.path.logs:target/logs",
+				"spring.data.elasticsearch.properties.path.home:target",
 				"management.health.diskspace.enabled:false");
-		this.context.register(ElasticsearchAutoConfiguration.class,
-				ManagementServerProperties.class, HealthIndicatorAutoConfiguration.class);
+		this.context.register(JestClientConfiguration.class, JestAutoConfiguration.class,
+				ElasticsearchAutoConfiguration.class, ManagementServerProperties.class,
+				HealthIndicatorAutoConfiguration.class);
 		this.context.refresh();
 
 		Map<String, HealthIndicator> beans = this.context
@@ -440,6 +458,21 @@ public class HealthIndicatorAutoConfigurationTests {
 	}
 
 	@Test
+	public void notCassandraHealthIndicator() throws Exception {
+		EnvironmentTestUtils.addEnvironment(this.context,
+				"management.health.diskspace.enabled:false",
+				"management.health.cassandra.enabled:false");
+		this.context.register(CassandraConfiguration.class,
+				ManagementServerProperties.class, HealthIndicatorAutoConfiguration.class);
+		this.context.refresh();
+		Map<String, HealthIndicator> beans = this.context
+				.getBeansOfType(HealthIndicator.class);
+		assertThat(beans).hasSize(1);
+		assertThat(beans.values().iterator().next().getClass())
+				.isEqualTo(ApplicationHealthIndicator.class);
+	}
+
+	@Test
 	public void couchbaseHealthIndicator() throws Exception {
 		EnvironmentTestUtils.addEnvironment(this.context,
 				"management.health.diskspace.enabled:false");
@@ -451,6 +484,21 @@ public class HealthIndicatorAutoConfigurationTests {
 		assertThat(beans.size()).isEqualTo(1);
 		assertThat(beans.values().iterator().next().getClass())
 				.isEqualTo(CouchbaseHealthIndicator.class);
+	}
+
+	@Test
+	public void notCouchbaseHealthIndicator() throws Exception {
+		EnvironmentTestUtils.addEnvironment(this.context,
+				"management.health.diskspace.enabled:false",
+				"management.health.couchbase.enabled:false");
+		this.context.register(CouchbaseConfiguration.class,
+				ManagementServerProperties.class, HealthIndicatorAutoConfiguration.class);
+		this.context.refresh();
+		Map<String, HealthIndicator> beans = this.context
+				.getBeansOfType(HealthIndicator.class);
+		assertThat(beans.size()).isEqualTo(1);
+		assertThat(beans.values().iterator().next().getClass())
+				.isEqualTo(ApplicationHealthIndicator.class);
 	}
 
 	@Configuration
@@ -502,6 +550,14 @@ public class HealthIndicatorAutoConfigurationTests {
 			return operations;
 		}
 
+	}
+
+	protected static class JestClientConfiguration {
+
+		@Bean
+		public JestClient jestClient() {
+			return mock(JestClient.class);
+		}
 	}
 
 }

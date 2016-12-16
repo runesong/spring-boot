@@ -35,6 +35,7 @@ import de.flapdoodle.embed.mongo.config.IMongodConfig;
 import de.flapdoodle.embed.mongo.config.MongodConfigBuilder;
 import de.flapdoodle.embed.mongo.config.Net;
 import de.flapdoodle.embed.mongo.config.RuntimeConfigBuilder;
+import de.flapdoodle.embed.mongo.config.Storage;
 import de.flapdoodle.embed.mongo.distribution.Feature;
 import de.flapdoodle.embed.mongo.distribution.IFeatureAwareVersion;
 import de.flapdoodle.embed.process.config.IRuntimeConfig;
@@ -62,6 +63,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
+import org.springframework.data.mongodb.core.MongoClientFactoryBean;
 import org.springframework.util.Assert;
 
 /**
@@ -69,6 +71,7 @@ import org.springframework.util.Assert;
  *
  * @author Henryk Konsek
  * @author Andy Wilkinson
+ * @author Yogesh Lonkar
  * @since 1.3.0
  */
 @Configuration
@@ -125,6 +128,14 @@ public class EmbeddedMongoAutoConfiguration {
 				this.embeddedProperties.getFeatures());
 		MongodConfigBuilder builder = new MongodConfigBuilder()
 				.version(featureAwareVersion);
+		if (this.embeddedProperties.getStorage() != null) {
+			builder.replication(
+					new Storage(this.embeddedProperties.getStorage().getDatabaseDir(),
+							this.embeddedProperties.getStorage().getReplSetName(),
+							this.embeddedProperties.getStorage().getOplogSize() != null
+									? this.embeddedProperties.getStorage().getOplogSize()
+									: 0));
+		}
 		if (getPort() > 0) {
 			builder.net(new Net(getHost().getHostAddress(), getPort(),
 					Network.localhostIsIPv6()));
@@ -209,7 +220,7 @@ public class EmbeddedMongoAutoConfiguration {
 	 * {@code embeddedMongoServer} bean.
 	 */
 	@Configuration
-	@ConditionalOnClass(MongoClient.class)
+	@ConditionalOnClass({ MongoClient.class, MongoClientFactoryBean.class })
 	protected static class EmbeddedMongoDependencyConfiguration
 			extends MongoClientDependsOnBeanFactoryPostProcessor {
 

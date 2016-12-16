@@ -28,7 +28,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.MutablePropertyValues;
 import org.springframework.beans.PropertyValues;
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.InitializingBean;
@@ -49,7 +48,7 @@ import org.springframework.validation.Validator;
  * them to an object of a specified type and then optionally running a {@link Validator}
  * over it.
  *
- * @param <T> The target type
+ * @param <T> the target type
  * @author Dave Syer
  */
 public class PropertiesConfigurationFactory<T>
@@ -67,8 +66,6 @@ public class PropertiesConfigurationFactory<T>
 
 	private boolean exceptionIfInvalid = true;
 
-	private Properties properties;
-
 	private PropertySources propertySources;
 
 	private final T target;
@@ -84,6 +81,8 @@ public class PropertiesConfigurationFactory<T>
 	private String targetName;
 
 	private ConversionService conversionService;
+
+	private boolean resolvePlaceholders = true;
 
 	/**
 	 * Create a new {@link PropertiesConfigurationFactory} instance.
@@ -103,7 +102,7 @@ public class PropertiesConfigurationFactory<T>
 	@SuppressWarnings("unchecked")
 	public PropertiesConfigurationFactory(Class<?> type) {
 		Assert.notNull(type);
-		this.target = (T) BeanUtils.instantiate(type);
+		this.target = (T) BeanUtils.instantiateClass(type);
 	}
 
 	/**
@@ -159,14 +158,6 @@ public class PropertiesConfigurationFactory<T>
 	}
 
 	/**
-	 * Set the properties.
-	 * @param properties the properties
-	 */
-	public void setProperties(Properties properties) {
-		this.properties = properties;
-	}
-
-	/**
 	 * Set the property sources.
 	 * @param propertySources the property sources
 	 */
@@ -199,6 +190,15 @@ public class PropertiesConfigurationFactory<T>
 		this.exceptionIfInvalid = exceptionIfInvalid;
 	}
 
+	/**
+	 * Flag to indicate that placeholders should be replaced during binding. Default is
+	 * true.
+	 * @param resolvePlaceholders flag value
+	 */
+	public void setResolvePlaceholders(boolean resolvePlaceholders) {
+		this.resolvePlaceholders = resolvePlaceholders;
+	}
+
 	@Override
 	public void afterPropertiesSet() throws Exception {
 		bindPropertiesToTarget();
@@ -226,16 +226,11 @@ public class PropertiesConfigurationFactory<T>
 	}
 
 	public void bindPropertiesToTarget() throws BindException {
-		Assert.state(this.properties != null || this.propertySources != null,
-				"Properties or propertySources should not be null");
+		Assert.state(this.propertySources != null, "PropertySources should not be null");
 		try {
 			if (this.logger.isTraceEnabled()) {
-				if (this.properties != null) {
-					this.logger.trace(String.format("Properties:%n%s" + this.properties));
-				}
-				else {
-					this.logger.trace("Property Sources: " + this.propertySources);
-				}
+				this.logger.trace("Property Sources: " + this.propertySources);
+
 			}
 			this.hasBeenBound = true;
 			doBindPropertiesToTarget();
@@ -259,13 +254,15 @@ public class PropertiesConfigurationFactory<T>
 		if (this.conversionService != null) {
 			dataBinder.setConversionService(this.conversionService);
 		}
+		dataBinder.setAutoGrowCollectionLimit(Integer.MAX_VALUE);
 		dataBinder.setIgnoreNestedProperties(this.ignoreNestedProperties);
 		dataBinder.setIgnoreInvalidFields(this.ignoreInvalidFields);
 		dataBinder.setIgnoreUnknownFields(this.ignoreUnknownFields);
 		customizeBinder(dataBinder);
 		Iterable<String> relaxedTargetNames = getRelaxedTargetNames();
 		Set<String> names = getNames(relaxedTargetNames);
-		PropertyValues propertyValues = getPropertyValues(names, relaxedTargetNames);
+		PropertyValues propertyValues = getPropertySourcesPropertyValues(names,
+				relaxedTargetNames);
 		dataBinder.bind(propertyValues);
 		if (this.validator != null) {
 			validate(dataBinder);
@@ -305,19 +302,12 @@ public class PropertiesConfigurationFactory<T>
 		return names;
 	}
 
-	private PropertyValues getPropertyValues(Set<String> names,
-			Iterable<String> relaxedTargetNames) {
-		if (this.properties != null) {
-			return new MutablePropertyValues(this.properties);
-		}
-		return getPropertySourcesPropertyValues(names, relaxedTargetNames);
-	}
-
 	private PropertyValues getPropertySourcesPropertyValues(Set<String> names,
 			Iterable<String> relaxedTargetNames) {
 		PropertyNamePatternsMatcher includes = getPropertyNamePatternsMatcher(names,
 				relaxedTargetNames);
-		return new PropertySourcesPropertyValues(this.propertySources, names, includes);
+		return new PropertySourcesPropertyValues(this.propertySources, names, includes,
+				this.resolvePlaceholders);
 	}
 
 	private PropertyNamePatternsMatcher getPropertyNamePatternsMatcher(Set<String> names,

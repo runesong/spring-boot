@@ -22,6 +22,8 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+import org.springframework.core.annotation.AliasFor;
+
 /**
  * Annotation for externalized configuration. Add this to a class definition or a
  * {@code @Bean} method in a {@code @Configuration} class if you want to bind and validate
@@ -44,6 +46,7 @@ public @interface ConfigurationProperties {
 	 * for {@link #prefix()}.
 	 * @return the name prefix of the properties to bind
 	 */
+	@AliasFor("prefix")
 	String value() default "";
 
 	/**
@@ -51,6 +54,7 @@ public @interface ConfigurationProperties {
 	 * for {@link #value()}.
 	 * @return the name prefix of the properties to bind
 	 */
+	@AliasFor("value")
 	String prefix() default "";
 
 	/**
@@ -82,29 +86,5 @@ public @interface ConfigurationProperties {
 	 * @return the flag value (default true)
 	 */
 	boolean exceptionIfInvalid() default true;
-
-	/**
-	 * Optionally provide explicit resource locations to bind to. By default the
-	 * configuration at these specified locations will be merged with the default
-	 * configuration. These resources take precedence over any other property sources
-	 * defined in the environment.
-	 * @return the path (or paths) of resources to bind to
-	 * @see #merge()
-	 * @deprecated since 1.4 in favor of configuring the environment directly with
-	 * additional locations
-	 */
-	@Deprecated
-	String[] locations() default {};
-
-	/**
-	 * Flag to indicate that configuration loaded from the specified locations should be
-	 * merged with the default configuration.
-	 * @return the flag value (default true)
-	 * @see #locations()
-	 * @deprecated since 1.4 along with {@link #locations()} in favor of configuring the
-	 * environment directly with additional locations
-	 */
-	@Deprecated
-	boolean merge() default true;
 
 }

@@ -72,6 +72,7 @@ import static org.mockito.Mockito.mock;
  * @author Marcel Overdijk
  * @author Sebastien Deleuze
  * @author Johannes Edmeier
+ * @author Grzegorz Poznachowski
  */
 public class JacksonAutoConfigurationTests {
 
@@ -367,7 +368,7 @@ public class JacksonAutoConfigurationTests {
 	public void customSerializationInclusion() {
 		this.context.register(JacksonAutoConfiguration.class);
 		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.jackson.serialization-inclusion:non_null");
+				"spring.jackson.default-property-inclusion:non_null");
 		this.context.refresh();
 		ObjectMapper objectMapper = this.context
 				.getBean(Jackson2ObjectMapperBuilder.class).build();
@@ -417,6 +418,15 @@ public class JacksonAutoConfigurationTests {
 		DateTime dateTime = new DateTime(1436966242231L, DateTimeZone.UTC);
 		assertThat(objectMapper.writeValueAsString(dateTime))
 				.isEqualTo("\"Koordinierte Universalzeit\"");
+	}
+
+	@Test
+	public void additionalJacksonBuilderCustomization() throws Exception {
+		this.context.register(JacksonAutoConfiguration.class,
+				ObjectMapperBuilderCustomConfig.class);
+		this.context.refresh();
+		ObjectMapper mapper = this.context.getBean(ObjectMapper.class);
+		assertThat(mapper.getDateFormat()).isInstanceOf(MyDateFormat.class);
 	}
 
 	@Test
@@ -506,6 +516,22 @@ public class JacksonAutoConfigurationTests {
 		@Bean
 		public ParameterNamesModule parameterNamesModule() {
 			return new ParameterNamesModule(JsonCreator.Mode.DELEGATING);
+		}
+
+	}
+
+	@Configuration
+	protected static class ObjectMapperBuilderCustomConfig {
+
+		@Bean
+		public Jackson2ObjectMapperBuilderCustomizer customDateFormat() {
+			return new Jackson2ObjectMapperBuilderCustomizer() {
+				@Override
+				public void customize(
+						Jackson2ObjectMapperBuilder jackson2ObjectMapperBuilder) {
+					jackson2ObjectMapperBuilder.dateFormat(new MyDateFormat());
+				}
+			};
 		}
 
 	}

@@ -21,6 +21,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.catalina.Container;
+import org.apache.catalina.core.StandardWrapper;
+import org.apache.jasper.EmbeddedServletOptions;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -30,8 +33,12 @@ import org.thymeleaf.templateresolver.TemplateResolver;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.thymeleaf.ThymeleafAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.EmbeddedServletContainerAutoConfiguration;
 import org.springframework.boot.autoconfigure.web.ResourceProperties;
-import org.springframework.boot.devtools.autoconfigure.RestartCompatibleRedisSerializerConfigurer.RestartCompatibleRedisSerializer;
+import org.springframework.boot.autoconfigure.web.ServerProperties;
+import org.springframework.boot.context.embedded.EmbeddedWebApplicationContext;
+import org.springframework.boot.context.embedded.tomcat.TomcatEmbeddedServletContainer;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.devtools.classpath.ClassPathChangedEvent;
 import org.springframework.boot.devtools.classpath.ClassPathFileSystemWatcher;
 import org.springframework.boot.devtools.filewatch.ChangedFiles;
@@ -236,28 +243,15 @@ public class LocalDevToolsAutoConfigurationTests {
 	}
 
 	@Test
-	public void sessionRedisTemplateIsConfiguredWithCustomDeserializers()
-			throws Exception {
-		sessionRedisTemplateIsConfiguredWithCustomDeserializers(
-				SessionRedisTemplateConfig.class);
-	}
-
-	private void sessionRedisTemplateIsConfiguredWithCustomDeserializers(
-			Object sessionConfig) throws Exception {
-		SpringApplication application = new SpringApplication(sessionConfig,
-				LocalDevToolsAutoConfiguration.class);
-		application.setWebEnvironment(false);
-		this.context = application.run();
-		RedisTemplate<?, ?> redisTemplate = this.context.getBean("sessionRedisTemplate",
-				RedisTemplate.class);
-		assertThat(redisTemplate.getHashKeySerializer())
-				.isInstanceOf(RestartCompatibleRedisSerializer.class);
-		assertThat(redisTemplate.getHashValueSerializer())
-				.isInstanceOf(RestartCompatibleRedisSerializer.class);
-		assertThat(redisTemplate.getKeySerializer())
-				.isInstanceOf(RestartCompatibleRedisSerializer.class);
-		assertThat(redisTemplate.getValueSerializer())
-				.isInstanceOf(RestartCompatibleRedisSerializer.class);
+	public void devToolsSwitchesJspServletToDevelopmentMode() {
+		this.context = initializeAndRun(Config.class);
+		TomcatEmbeddedServletContainer tomcatContainer = (TomcatEmbeddedServletContainer) ((EmbeddedWebApplicationContext) this.context)
+				.getEmbeddedServletContainer();
+		Container context = tomcatContainer.getTomcat().getHost().findChildren()[0];
+		StandardWrapper jspServletWrapper = (StandardWrapper) context.findChild("jsp");
+		EmbeddedServletOptions options = (EmbeddedServletOptions) ReflectionTestUtils
+				.getField(jspServletWrapper.getServlet(), "options");
+		assertThat(options.getDevelopment()).isEqualTo(true);
 	}
 
 	private ConfigurableApplicationContext initializeAndRun(Class<?> config,
@@ -270,7 +264,6 @@ public class LocalDevToolsAutoConfigurationTests {
 		Restarter.initialize(new String[0], false, new MockRestartInitializer(), false);
 		SpringApplication application = new SpringApplication(config);
 		application.setDefaultProperties(getDefaultProperties(properties));
-		application.setWebEnvironment(false);
 		ConfigurableApplicationContext context = application.run(args);
 		return context;
 	}
@@ -280,18 +273,23 @@ public class LocalDevToolsAutoConfigurationTests {
 		Map<String, Object> properties = new HashMap<String, Object>();
 		properties.put("spring.thymeleaf.check-template-location", false);
 		properties.put("spring.devtools.livereload.port", this.liveReloadPort);
+		properties.put("server.port", 0);
 		properties.putAll(specifiedProperties);
 		return properties;
 	}
 
 	@Configuration
-	@Import({ LocalDevToolsAutoConfiguration.class, ThymeleafAutoConfiguration.class })
+	@Import({ EmbeddedServletContainerAutoConfiguration.class,
+			LocalDevToolsAutoConfiguration.class, ThymeleafAutoConfiguration.class })
+	@EnableConfigurationProperties(ServerProperties.class)
 	public static class Config {
 
 	}
 
 	@Configuration
-	@Import({ LocalDevToolsAutoConfiguration.class, ThymeleafAutoConfiguration.class })
+	@Import({ EmbeddedServletContainerAutoConfiguration.class,
+			LocalDevToolsAutoConfiguration.class, ThymeleafAutoConfiguration.class })
+	@EnableConfigurationProperties(ServerProperties.class)
 	public static class ConfigWithMockLiveReload {
 
 		@Bean
@@ -302,7 +300,9 @@ public class LocalDevToolsAutoConfigurationTests {
 	}
 
 	@Configuration
-	@Import({ LocalDevToolsAutoConfiguration.class, ResourceProperties.class })
+	@Import({ EmbeddedServletContainerAutoConfiguration.class,
+			LocalDevToolsAutoConfiguration.class, ResourceProperties.class })
+	@EnableConfigurationProperties(ServerProperties.class)
 	public static class WebResourcesConfig {
 
 	}

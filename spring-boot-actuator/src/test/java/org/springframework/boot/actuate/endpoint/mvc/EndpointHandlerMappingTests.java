@@ -27,8 +27,7 @@ import org.springframework.context.support.StaticApplicationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.method.HandlerMethod;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,9 +38,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Phillip Webb
  * @author Dave Syer
  */
-public class EndpointHandlerMappingTests {
+public class EndpointHandlerMappingTests extends AbstractEndpointHandlerMappingTests {
 
 	private final StaticApplicationContext context = new StaticApplicationContext();
+
 	private Method method;
 
 	@Before
@@ -51,8 +51,8 @@ public class EndpointHandlerMappingTests {
 
 	@Test
 	public void withoutPrefix() throws Exception {
-		TestMvcEndpoint endpointA = new TestMvcEndpoint(new TestEndpoint("/a"));
-		TestMvcEndpoint endpointB = new TestMvcEndpoint(new TestEndpoint("/b"));
+		TestMvcEndpoint endpointA = new TestMvcEndpoint(new TestEndpoint("a"));
+		TestMvcEndpoint endpointB = new TestMvcEndpoint(new TestEndpoint("b"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpointA, endpointB));
 		mapping.setApplicationContext(this.context);
@@ -66,8 +66,8 @@ public class EndpointHandlerMappingTests {
 
 	@Test
 	public void withPrefix() throws Exception {
-		TestMvcEndpoint endpointA = new TestMvcEndpoint(new TestEndpoint("/a"));
-		TestMvcEndpoint endpointB = new TestMvcEndpoint(new TestEndpoint("/b"));
+		TestMvcEndpoint endpointA = new TestMvcEndpoint(new TestEndpoint("a"));
+		TestMvcEndpoint endpointB = new TestMvcEndpoint(new TestEndpoint("b"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpointA, endpointB));
 		mapping.setApplicationContext(this.context);
@@ -82,7 +82,7 @@ public class EndpointHandlerMappingTests {
 
 	@Test(expected = HttpRequestMethodNotSupportedException.class)
 	public void onlyGetHttpMethodForNonActionEndpoints() throws Exception {
-		TestActionEndpoint endpoint = new TestActionEndpoint(new TestEndpoint("/a"));
+		TestActionEndpoint endpoint = new TestActionEndpoint(new TestEndpoint("a"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpoint));
 		mapping.setApplicationContext(this.context);
@@ -93,7 +93,7 @@ public class EndpointHandlerMappingTests {
 
 	@Test
 	public void postHttpMethodForActionEndpoints() throws Exception {
-		TestActionEndpoint endpoint = new TestActionEndpoint(new TestEndpoint("/a"));
+		TestActionEndpoint endpoint = new TestActionEndpoint(new TestEndpoint("a"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpoint));
 		mapping.setApplicationContext(this.context);
@@ -103,7 +103,7 @@ public class EndpointHandlerMappingTests {
 
 	@Test(expected = HttpRequestMethodNotSupportedException.class)
 	public void onlyPostHttpMethodForActionEndpoints() throws Exception {
-		TestActionEndpoint endpoint = new TestActionEndpoint(new TestEndpoint("/a"));
+		TestActionEndpoint endpoint = new TestActionEndpoint(new TestEndpoint("a"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpoint));
 		mapping.setApplicationContext(this.context);
@@ -114,7 +114,7 @@ public class EndpointHandlerMappingTests {
 
 	@Test
 	public void disabled() throws Exception {
-		TestMvcEndpoint endpoint = new TestMvcEndpoint(new TestEndpoint("/a"));
+		TestMvcEndpoint endpoint = new TestMvcEndpoint(new TestEndpoint("a"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpoint));
 		mapping.setDisabled(true);
@@ -125,8 +125,8 @@ public class EndpointHandlerMappingTests {
 
 	@Test
 	public void duplicatePath() throws Exception {
-		TestMvcEndpoint endpoint = new TestMvcEndpoint(new TestEndpoint("/a"));
-		TestActionEndpoint other = new TestActionEndpoint(new TestEndpoint("/a"));
+		TestMvcEndpoint endpoint = new TestMvcEndpoint(new TestEndpoint("a"));
+		TestActionEndpoint other = new TestActionEndpoint(new TestEndpoint("a"));
 		EndpointHandlerMapping mapping = new EndpointHandlerMapping(
 				Arrays.asList(endpoint, other));
 		mapping.setDisabled(true);
@@ -142,8 +142,8 @@ public class EndpointHandlerMappingTests {
 
 	private static class TestEndpoint extends AbstractEndpoint<Object> {
 
-		TestEndpoint(String path) {
-			super(path);
+		TestEndpoint(String id) {
+			super(id);
 		}
 
 		@Override
@@ -168,7 +168,7 @@ public class EndpointHandlerMappingTests {
 		}
 
 		@Override
-		@RequestMapping(method = RequestMethod.POST)
+		@PostMapping
 		public Object invoke() {
 			return null;
 		}

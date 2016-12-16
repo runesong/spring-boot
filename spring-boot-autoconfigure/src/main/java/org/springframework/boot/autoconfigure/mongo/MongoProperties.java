@@ -18,7 +18,7 @@ package org.springframework.boot.autoconfigure.mongo;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import com.mongodb.MongoClient;
@@ -39,6 +39,8 @@ import org.springframework.core.env.Environment;
  * @author Josh Long
  * @author Andy Wilkinson
  * @author Eddú Meléndez
+ * @author Stephane Nicoll
+ * @author Nasko Vasilev
  */
 @ConfigurationProperties(prefix = "spring.data.mongodb")
 public class MongoProperties {
@@ -48,20 +50,22 @@ public class MongoProperties {
 	 */
 	public static final int DEFAULT_PORT = 27017;
 
+	public static final String DEFAULT_URI = "mongodb://localhost/test";
+
 	/**
-	 * Mongo server host.
+	 * Mongo server host. Cannot be set with uri.
 	 */
 	private String host;
 
 	/**
-	 * Mongo server port.
+	 * Mongo server port. Cannot be set with uri.
 	 */
 	private Integer port = null;
 
 	/**
-	 * Mongo database URI. When set, host and port are ignored.
+	 * Mongo database URI. Cannot be set with host, port and credentials.
 	 */
-	private String uri = "mongodb://localhost/test";
+	private String uri;
 
 	/**
 	 * Database name.
@@ -79,12 +83,12 @@ public class MongoProperties {
 	private String gridFsDatabase;
 
 	/**
-	 * Login user of the mongo server.
+	 * Login user of the mongo server. Cannot be set with uri.
 	 */
 	private String username;
 
 	/**
-	 * Login password of the mongo server.
+	 * Login password of the mongo server. Cannot be set with uri.
 	 */
 	private char[] password;
 
@@ -154,6 +158,10 @@ public class MongoProperties {
 		return this.uri;
 	}
 
+	public String determineUri() {
+		return (this.uri != null ? this.uri : DEFAULT_URI);
+	}
+
 	public void setUri(String uri) {
 		this.uri = uri;
 	}
@@ -178,7 +186,7 @@ public class MongoProperties {
 		if (this.database != null) {
 			return this.database;
 		}
-		return new MongoClientURI(this.uri).getDatabase();
+		return new MongoClientURI(determineUri()).getDatabase();
 	}
 
 	/**
@@ -196,6 +204,10 @@ public class MongoProperties {
 			Environment environment) throws UnknownHostException {
 		try {
 			if (hasCustomAddress() || hasCustomCredentials()) {
+				if (this.uri != null) {
+					throw new IllegalStateException("Invalid mongo configuration, "
+							+ "either uri or host/port/credentials must be specified");
+				}
 				if (options == null) {
 					options = MongoClientOptions.builder().build();
 				}
@@ -208,11 +220,12 @@ public class MongoProperties {
 				}
 				String host = this.host == null ? "localhost" : this.host;
 				int port = determinePort(environment);
-				return new MongoClient(Arrays.asList(new ServerAddress(host, port)),
+				return new MongoClient(
+						Collections.singletonList(new ServerAddress(host, port)),
 						credentials, options);
 			}
 			// The options and credentials are in the URI
-			return new MongoClient(new MongoClientURI(this.uri, builder(options)));
+			return new MongoClient(new MongoClientURI(determineUri(), builder(options)));
 		}
 		finally {
 			clearPassword();
@@ -246,25 +259,10 @@ public class MongoProperties {
 	}
 
 	private Builder builder(MongoClientOptions options) {
-		Builder builder = MongoClientOptions.builder();
 		if (options != null) {
-			builder.alwaysUseMBeans(options.isAlwaysUseMBeans());
-			builder.connectionsPerHost(options.getConnectionsPerHost());
-			builder.connectTimeout(options.getConnectTimeout());
-			builder.cursorFinalizerEnabled(options.isCursorFinalizerEnabled());
-			builder.dbDecoderFactory(options.getDbDecoderFactory());
-			builder.dbEncoderFactory(options.getDbEncoderFactory());
-			builder.description(options.getDescription());
-			builder.maxWaitTime(options.getMaxWaitTime());
-			builder.readPreference(options.getReadPreference());
-			builder.socketFactory(options.getSocketFactory());
-			builder.socketKeepAlive(options.isSocketKeepAlive());
-			builder.socketTimeout(options.getSocketTimeout());
-			builder.threadsAllowedToBlockForConnectionMultiplier(
-					options.getThreadsAllowedToBlockForConnectionMultiplier());
-			builder.writeConcern(options.getWriteConcern());
+			return MongoClientOptions.builder(options);
 		}
-		return builder;
+		return MongoClientOptions.builder();
 	}
 
 }

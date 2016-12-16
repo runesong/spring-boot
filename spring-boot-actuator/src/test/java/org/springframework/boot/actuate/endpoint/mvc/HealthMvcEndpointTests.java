@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.springframework.boot.actuate.endpoint.HealthEndpoint;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.Status;
+import org.springframework.boot.test.util.EnvironmentTestUtils;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.PropertySource;
 import org.springframework.http.HttpStatus;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.mock;
  * @author Christian Dupuis
  * @author Dave Syer
  * @author Andy Wilkinson
+ * @author Eddú Meléndez
  */
 public class HealthMvcEndpointTests {
 
@@ -49,19 +51,30 @@ public class HealthMvcEndpointTests {
 			Collections.<String, Object>singletonMap("endpoints.health.sensitive",
 					"false"));
 
+	private static final PropertySource<?> SECURITY_ROLES = new MapPropertySource("test",
+			Collections.<String, Object>singletonMap("management.security.roles",
+					"HERO, USER"));
+
 	private HealthEndpoint endpoint = null;
 
 	private HealthMvcEndpoint mvc = null;
 
 	private MockEnvironment environment;
 
-	private UsernamePasswordAuthenticationToken user = new UsernamePasswordAuthenticationToken(
-			"user", "password",
-			AuthorityUtils.commaSeparatedStringToAuthorityList("ROLE_USER"));
+	private UsernamePasswordAuthenticationToken user = createAuthenticationToken(
+			"ROLE_USER");
 
-	private UsernamePasswordAuthenticationToken admin = new UsernamePasswordAuthenticationToken(
-			"user", "password",
-			AuthorityUtils.commaSeparatedStringToAuthorityList("ROLE_ADMIN"));
+	private UsernamePasswordAuthenticationToken actuator = createAuthenticationToken(
+			"ROLE_ACTUATOR");
+
+	private UsernamePasswordAuthenticationToken hero = createAuthenticationToken(
+			"ROLE_HERO");
+
+	private UsernamePasswordAuthenticationToken createAuthenticationToken(
+			String authority) {
+		return new UsernamePasswordAuthenticationToken("user", "password",
+				AuthorityUtils.commaSeparatedStringToAuthorityList(authority));
+	}
 
 	@Before
 	public void init() {
@@ -124,7 +137,7 @@ public class HealthMvcEndpointTests {
 		given(this.endpoint.invoke())
 				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
 		given(this.endpoint.isSensitive()).willReturn(false);
-		Object result = this.mvc.invoke(this.admin);
+		Object result = this.mvc.invoke(this.actuator);
 		assertThat(result instanceof Health).isTrue();
 		assertThat(((Health) result).getStatus() == Status.UP).isTrue();
 		assertThat(((Health) result).getDetails().get("foo")).isEqualTo("bar");
@@ -141,12 +154,34 @@ public class HealthMvcEndpointTests {
 	}
 
 	@Test
+	public void secureCustomRole() {
+		this.environment.getPropertySources().addLast(SECURITY_ROLES);
+		given(this.endpoint.invoke())
+				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
+		Object result = this.mvc.invoke(this.hero);
+		assertThat(result instanceof Health).isTrue();
+		assertThat(((Health) result).getStatus() == Status.UP).isTrue();
+		assertThat(((Health) result).getDetails().get("foo")).isEqualTo("bar");
+	}
+
+	@Test
+	public void secureCustomRoleNoAccess() {
+		this.environment.getPropertySources().addLast(SECURITY_ROLES);
+		given(this.endpoint.invoke())
+				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
+		Object result = this.mvc.invoke(this.actuator);
+		assertThat(result instanceof Health).isTrue();
+		assertThat(((Health) result).getStatus() == Status.UP).isTrue();
+		assertThat(((Health) result).getDetails().get("foo")).isNull();
+	}
+
+	@Test
 	public void healthIsCached() {
 		given(this.endpoint.getTimeToLive()).willReturn(10000L);
 		given(this.endpoint.isSensitive()).willReturn(true);
 		given(this.endpoint.invoke())
 				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
-		Object result = this.mvc.invoke(this.admin);
+		Object result = this.mvc.invoke(this.actuator);
 		assertThat(result instanceof Health).isTrue();
 		Health health = (Health) result;
 		assertThat(health.getStatus() == Status.UP).isTrue();
@@ -228,6 +263,47 @@ public class HealthMvcEndpointTests {
 		@SuppressWarnings("unchecked")
 		Health health = ((ResponseEntity<Health>) result).getBody();
 		assertThat(health.getStatus() == Status.DOWN).isTrue();
+	}
+
+	@Test
+	public void detailIsHiddenWhenAllEndpointsAreSensitive() {
+		EnvironmentTestUtils.addEnvironment(this.environment, "endpoints.sensitive:true");
+		this.mvc = new HealthMvcEndpoint(this.endpoint, false);
+		this.mvc.setEnvironment(this.environment);
+		given(this.endpoint.invoke())
+				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
+		Object result = this.mvc.invoke(null);
+		assertThat(result instanceof Health).isTrue();
+		assertThat(((Health) result).getStatus() == Status.UP).isTrue();
+		assertThat(((Health) result).getDetails().get("foo")).isNull();
+	}
+
+	@Test
+	public void detailIsHiddenWhenHealthEndpointIsSensitive() {
+		EnvironmentTestUtils.addEnvironment(this.environment,
+				"endpoints.health.sensitive:true");
+		this.mvc = new HealthMvcEndpoint(this.endpoint, false);
+		this.mvc.setEnvironment(this.environment);
+		given(this.endpoint.invoke())
+				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
+		Object result = this.mvc.invoke(null);
+		assertThat(result instanceof Health).isTrue();
+		assertThat(((Health) result).getStatus() == Status.UP).isTrue();
+		assertThat(((Health) result).getDetails().get("foo")).isNull();
+	}
+
+	@Test
+	public void detailIsHiddenWhenOnlyHealthEndpointIsSensitive() {
+		EnvironmentTestUtils.addEnvironment(this.environment,
+				"endpoints.health.sensitive:true", "endpoints.sensitive:false");
+		this.mvc = new HealthMvcEndpoint(this.endpoint, false);
+		this.mvc.setEnvironment(this.environment);
+		given(this.endpoint.invoke())
+				.willReturn(new Health.Builder().up().withDetail("foo", "bar").build());
+		Object result = this.mvc.invoke(null);
+		assertThat(result instanceof Health).isTrue();
+		assertThat(((Health) result).getStatus() == Status.UP).isTrue();
+		assertThat(((Health) result).getDetails().get("foo")).isNull();
 	}
 
 }

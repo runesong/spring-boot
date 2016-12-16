@@ -19,8 +19,10 @@ package org.springframework.boot.autoconfigure.web;
 import java.io.File;
 import java.net.InetAddress;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -30,6 +32,8 @@ import javax.servlet.SessionCookieConfig;
 import javax.servlet.SessionTrackingMode;
 import javax.validation.constraints.NotNull;
 
+import io.undertow.Undertow.Builder;
+import io.undertow.UndertowOptions;
 import org.apache.catalina.Context;
 import org.apache.catalina.connector.Connector;
 import org.apache.catalina.valves.AccessLogValve;
@@ -37,6 +41,14 @@ import org.apache.catalina.valves.RemoteIpValve;
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.ProtocolHandler;
 import org.apache.coyote.http11.AbstractHttp11Protocol;
+import org.eclipse.jetty.server.AbstractConnector;
+import org.eclipse.jetty.server.ConnectionFactory;
+import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.handler.ContextHandler;
+import org.eclipse.jetty.server.handler.HandlerCollection;
+import org.eclipse.jetty.server.handler.HandlerWrapper;
 
 import org.springframework.boot.autoconfigure.web.ServerProperties.Session.Cookie;
 import org.springframework.boot.cloud.CloudPlatform;
@@ -47,18 +59,22 @@ import org.springframework.boot.context.embedded.EmbeddedServletContainerCustomi
 import org.springframework.boot.context.embedded.EmbeddedServletContainerFactory;
 import org.springframework.boot.context.embedded.InitParameterConfiguringServletContextInitializer;
 import org.springframework.boot.context.embedded.JspServlet;
-import org.springframework.boot.context.embedded.ServletContextInitializer;
 import org.springframework.boot.context.embedded.Ssl;
 import org.springframework.boot.context.embedded.jetty.JettyEmbeddedServletContainerFactory;
+import org.springframework.boot.context.embedded.jetty.JettyServerCustomizer;
 import org.springframework.boot.context.embedded.tomcat.TomcatConnectorCustomizer;
 import org.springframework.boot.context.embedded.tomcat.TomcatContextCustomizer;
 import org.springframework.boot.context.embedded.tomcat.TomcatEmbeddedServletContainerFactory;
+import org.springframework.boot.context.embedded.undertow.UndertowBuilderCustomizer;
 import org.springframework.boot.context.embedded.undertow.UndertowEmbeddedServletContainerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.DeprecatedConfigurationProperty;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
+import org.springframework.boot.web.servlet.ServletContextInitializer;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.Environment;
+import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
 /**
@@ -72,6 +88,9 @@ import org.springframework.util.StringUtils;
  * @author Ivan Sopov
  * @author Marcos Barbero
  * @author Eddú Meléndez
+ * @author Quinten De Swaef
+ * @author Venil Noronha
+ * @author Aurélien Leboulanger
  */
 @ConfigurationProperties(prefix = "server", ignoreUnknownFields = true)
 public class ServerProperties
@@ -117,9 +136,21 @@ public class ServerProperties
 	private Boolean useForwardHeaders;
 
 	/**
-	 * Value to use for the server header (uses servlet container default if empty).
+	 * Value to use for the Server response header (no header is sent if empty).
 	 */
 	private String serverHeader;
+
+	/**
+	 * Maximum size in bytes of the HTTP message header.
+	 */
+	private int maxHttpHeaderSize = 0; // bytes
+
+	/**
+	 * Time in milliseconds that connectors will wait for another HTTP request before
+	 * closing the connection. When not set, the connector's container-specific default
+	 * will be used. Use a value of -1 to indicate no (i.e. infinite) timeout.
+	 */
+	private Integer connectionTimeout;
 
 	private Session session = new Session();
 
@@ -318,12 +349,28 @@ public class ServerProperties
 		this.serverHeader = serverHeader;
 	}
 
+	public int getMaxHttpHeaderSize() {
+		return this.maxHttpHeaderSize;
+	}
+
+	public void setMaxHttpHeaderSize(int maxHttpHeaderSize) {
+		this.maxHttpHeaderSize = maxHttpHeaderSize;
+	}
+
 	protected final boolean getOrDeduceUseForwardHeaders() {
 		if (this.useForwardHeaders != null) {
 			return this.useForwardHeaders;
 		}
 		CloudPlatform platform = CloudPlatform.getActive(this.environment);
 		return (platform == null ? false : platform.isUsingForwardHeaders());
+	}
+
+	public Integer getConnectionTimeout() {
+		return this.connectionTimeout;
+	}
+
+	public void setConnectionTimeout(Integer connectionTimeout) {
+		this.connectionTimeout = connectionTimeout;
 	}
 
 	public ErrorProperties getError() {
@@ -362,7 +409,7 @@ public class ServerProperties
 		return this.tomcat;
 	}
 
-	private Jetty getJetty() {
+	public Jetty getJetty() {
 		return this.jetty;
 	}
 
@@ -581,14 +628,50 @@ public class ServerProperties
 		private int maxThreads = 0; // Number of threads in protocol handler
 
 		/**
+		 * Minimum amount of worker threads.
+		 */
+		private int minSpareThreads = 0; // Minimum spare threads in protocol handler
+
+		/**
+		 * Maximum size in bytes of the HTTP post content.
+		 */
+		private int maxHttpPostSize = 0; // bytes
+
+		/**
 		 * Maximum size in bytes of the HTTP message header.
 		 */
 		private int maxHttpHeaderSize = 0; // bytes
 
 		/**
+		 * Whether requests to the context root should be redirected by appending a / to
+		 * the path.
+		 */
+		private Boolean redirectContextRoot;
+
+		/**
 		 * Character encoding to use to decode the URI.
 		 */
 		private Charset uriEncoding;
+
+		/**
+		 * Maximum number of connections that the server will accept and process at any
+		 * given time. Once the limit has been reached, the operating system may still
+		 * accept connections based on the "acceptCount" property.
+		 */
+		private int maxConnections = 0;
+
+		/**
+		 * Maximum queue length for incoming connection requests when all possible request
+		 * processing threads are in use.
+		 */
+		private int acceptCount = 0;
+
+		/**
+		 * Comma-separated list of additional patterns that match jars to ignore for TLD
+		 * scanning. The special '?' and '*' characters can be used in the pattern to
+		 * match one and only one character and zero or more characters respectively.
+		 */
+		private List<String> additionalTldSkipPatterns = new ArrayList<String>();
 
 		public int getMaxThreads() {
 			return this.maxThreads;
@@ -598,12 +681,20 @@ public class ServerProperties
 			this.maxThreads = maxThreads;
 		}
 
-		public int getMaxHttpHeaderSize() {
-			return this.maxHttpHeaderSize;
+		public int getMinSpareThreads() {
+			return this.minSpareThreads;
 		}
 
-		public void setMaxHttpHeaderSize(int maxHttpHeaderSize) {
-			this.maxHttpHeaderSize = maxHttpHeaderSize;
+		public void setMinSpareThreads(int minSpareThreads) {
+			this.minSpareThreads = minSpareThreads;
+		}
+
+		public int getMaxHttpPostSize() {
+			return this.maxHttpPostSize;
+		}
+
+		public void setMaxHttpPostSize(int maxHttpPostSize) {
+			this.maxHttpPostSize = maxHttpPostSize;
 		}
 
 		public Accesslog getAccesslog() {
@@ -658,6 +749,14 @@ public class ServerProperties
 			this.portHeader = portHeader;
 		}
 
+		public Boolean getRedirectContextRoot() {
+			return this.redirectContextRoot;
+		}
+
+		public void setRedirectContextRoot(Boolean redirectContextRoot) {
+			this.redirectContextRoot = redirectContextRoot;
+		}
+
 		public String getRemoteIpHeader() {
 			return this.remoteIpHeader;
 		}
@@ -674,18 +773,50 @@ public class ServerProperties
 			this.uriEncoding = uriEncoding;
 		}
 
+		public int getMaxConnections() {
+			return this.maxConnections;
+		}
+
+		public void setMaxConnections(int maxConnections) {
+			this.maxConnections = maxConnections;
+		}
+
+		public int getAcceptCount() {
+			return this.acceptCount;
+		}
+
+		public void setAcceptCount(int acceptCount) {
+			this.acceptCount = acceptCount;
+		}
+
+		public List<String> getAdditionalTldSkipPatterns() {
+			return this.additionalTldSkipPatterns;
+		}
+
+		public void setAdditionalTldSkipPatterns(List<String> additionalTldSkipPatterns) {
+			this.additionalTldSkipPatterns = additionalTldSkipPatterns;
+		}
+
 		void customizeTomcat(ServerProperties serverProperties,
 				TomcatEmbeddedServletContainerFactory factory) {
 			if (getBasedir() != null) {
 				factory.setBaseDirectory(getBasedir());
 			}
-			customizeBackgroundProcessorDelay(factory);
+			factory.setBackgroundProcessorDelay(Tomcat.this.backgroundProcessorDelay);
 			customizeRemoteIpValve(serverProperties, factory);
 			if (this.maxThreads > 0) {
 				customizeMaxThreads(factory);
 			}
-			if (this.maxHttpHeaderSize > 0) {
-				customizeMaxHttpHeaderSize(factory);
+			if (this.minSpareThreads > 0) {
+				customizeMinThreads(factory);
+			}
+			int maxHttpHeaderSize = (serverProperties.getMaxHttpHeaderSize() > 0
+					? serverProperties.getMaxHttpHeaderSize() : this.maxHttpHeaderSize);
+			if (maxHttpHeaderSize > 0) {
+				customizeMaxHttpHeaderSize(factory, maxHttpHeaderSize);
+			}
+			if (this.maxHttpPostSize > 0) {
+				customizeMaxHttpPostSize(factory, this.maxHttpPostSize);
 			}
 			if (this.accesslog.enabled) {
 				customizeAccessLog(factory);
@@ -693,16 +824,67 @@ public class ServerProperties
 			if (getUriEncoding() != null) {
 				factory.setUriEncoding(getUriEncoding());
 			}
+			if (serverProperties.getConnectionTimeout() != null) {
+				customizeConnectionTimeout(factory,
+						serverProperties.getConnectionTimeout());
+			}
+			if (this.redirectContextRoot != null) {
+				customizeRedirectContextRoot(factory, this.redirectContextRoot);
+			}
+			if (this.maxConnections > 0) {
+				customizeMaxConnections(factory);
+			}
+			if (this.acceptCount > 0) {
+				customizeAcceptCount(factory);
+			}
+			if (!ObjectUtils.isEmpty(this.additionalTldSkipPatterns)) {
+				factory.getTldSkipPatterns().addAll(this.additionalTldSkipPatterns);
+			}
 		}
 
-		private void customizeBackgroundProcessorDelay(
-				TomcatEmbeddedServletContainerFactory factory) {
-			factory.addContextCustomizers(new TomcatContextCustomizer() {
+		private void customizeAcceptCount(TomcatEmbeddedServletContainerFactory factory) {
+			factory.addConnectorCustomizers(new TomcatConnectorCustomizer() {
 
 				@Override
-				public void customize(Context context) {
-					context.setBackgroundProcessorDelay(
-							Tomcat.this.backgroundProcessorDelay);
+				public void customize(Connector connector) {
+					ProtocolHandler handler = connector.getProtocolHandler();
+					if (handler instanceof AbstractProtocol) {
+						AbstractProtocol<?> protocol = (AbstractProtocol<?>) handler;
+						protocol.setBacklog(Tomcat.this.acceptCount);
+					}
+				}
+
+			});
+		}
+
+		private void customizeMaxConnections(
+				TomcatEmbeddedServletContainerFactory factory) {
+			factory.addConnectorCustomizers(new TomcatConnectorCustomizer() {
+
+				@Override
+				public void customize(Connector connector) {
+					ProtocolHandler handler = connector.getProtocolHandler();
+					if (handler instanceof AbstractProtocol) {
+						AbstractProtocol<?> protocol = (AbstractProtocol<?>) handler;
+						protocol.setMaxConnections(Tomcat.this.maxConnections);
+					}
+				}
+
+			});
+		}
+
+		private void customizeConnectionTimeout(
+				TomcatEmbeddedServletContainerFactory factory,
+				final int connectionTimeout) {
+			factory.addConnectorCustomizers(new TomcatConnectorCustomizer() {
+
+				@Override
+				public void customize(Connector connector) {
+					ProtocolHandler handler = connector.getProtocolHandler();
+					if (handler instanceof AbstractProtocol) {
+						AbstractProtocol<?> protocol = (AbstractProtocol<?>) handler;
+						protocol.setConnectionTimeout(connectionTimeout);
+					}
 				}
 
 			});
@@ -727,7 +909,7 @@ public class ServerProperties
 				valve.setPortHeader(getPortHeader());
 				valve.setProtocolHeaderHttpsValue(getProtocolHeaderHttpsValue());
 				// ... so it's safe to add this valve by default.
-				factory.addContextValves(valve);
+				factory.addEngineValves(valve);
 			}
 		}
 
@@ -748,8 +930,25 @@ public class ServerProperties
 		}
 
 		@SuppressWarnings("rawtypes")
+		private void customizeMinThreads(TomcatEmbeddedServletContainerFactory factory) {
+			factory.addConnectorCustomizers(new TomcatConnectorCustomizer() {
+				@Override
+				public void customize(Connector connector) {
+
+					ProtocolHandler handler = connector.getProtocolHandler();
+					if (handler instanceof AbstractProtocol) {
+						AbstractProtocol protocol = (AbstractProtocol) handler;
+						protocol.setMinSpareThreads(Tomcat.this.minSpareThreads);
+					}
+
+				}
+			});
+		}
+
+		@SuppressWarnings("rawtypes")
 		private void customizeMaxHttpHeaderSize(
-				TomcatEmbeddedServletContainerFactory factory) {
+				TomcatEmbeddedServletContainerFactory factory,
+				final int maxHttpHeaderSize) {
 			factory.addConnectorCustomizers(new TomcatConnectorCustomizer() {
 
 				@Override
@@ -757,8 +956,21 @@ public class ServerProperties
 					ProtocolHandler handler = connector.getProtocolHandler();
 					if (handler instanceof AbstractHttp11Protocol) {
 						AbstractHttp11Protocol protocol = (AbstractHttp11Protocol) handler;
-						protocol.setMaxHttpHeaderSize(Tomcat.this.maxHttpHeaderSize);
+						protocol.setMaxHttpHeaderSize(maxHttpHeaderSize);
 					}
+				}
+
+			});
+		}
+
+		private void customizeMaxHttpPostSize(
+				TomcatEmbeddedServletContainerFactory factory,
+				final int maxHttpPostSize) {
+			factory.addConnectorCustomizers(new TomcatConnectorCustomizer() {
+
+				@Override
+				public void customize(Connector connector) {
+					connector.setMaxPostSize(maxHttpPostSize);
 				}
 
 			});
@@ -770,7 +982,25 @@ public class ServerProperties
 			valve.setDirectory(this.accesslog.getDirectory());
 			valve.setPrefix(this.accesslog.getPrefix());
 			valve.setSuffix(this.accesslog.getSuffix());
-			factory.addContextValves(valve);
+			valve.setRenameOnRotate(this.accesslog.isRenameOnRotate());
+			valve.setRequestAttributesEnabled(
+					this.accesslog.isRequestAttributesEnabled());
+			valve.setRotatable(this.accesslog.isRotate());
+			valve.setBuffered(this.accesslog.isBuffered());
+			factory.addEngineValves(valve);
+		}
+
+		private void customizeRedirectContextRoot(
+				TomcatEmbeddedServletContainerFactory factory,
+				final boolean redirectContextRoot) {
+			factory.addContextCustomizers(new TomcatContextCustomizer() {
+
+				@Override
+				public void customize(Context context) {
+					context.setMapperContextRootRedirectEnabled(redirectContextRoot);
+				}
+
+			});
 		}
 
 		public static class Accesslog {
@@ -800,6 +1030,27 @@ public class ServerProperties
 			 * Log file name suffix.
 			 */
 			private String suffix = ".log";
+
+			/**
+			 * Enable access log rotation.
+			 */
+			private boolean rotate = true;
+
+			/**
+			 * Defer inclusion of the date stamp in the file name until rotate time.
+			 */
+			private boolean renameOnRotate;
+
+			/**
+			 * Set request attributes for IP address, Hostname, protocol and port used for
+			 * the request.
+			 */
+			private boolean requestAttributesEnabled;
+
+			/**
+			 * Buffer output such that it is only flushed periodically.
+			 */
+			private boolean buffered = true;
 
 			public boolean isEnabled() {
 				return this.enabled;
@@ -840,20 +1091,212 @@ public class ServerProperties
 			public void setSuffix(String suffix) {
 				this.suffix = suffix;
 			}
+
+			public boolean isRotate() {
+				return this.rotate;
+			}
+
+			public void setRotate(boolean rotate) {
+				this.rotate = rotate;
+			}
+
+			public boolean isRenameOnRotate() {
+				return this.renameOnRotate;
+			}
+
+			public void setRenameOnRotate(boolean renameOnRotate) {
+				this.renameOnRotate = renameOnRotate;
+			}
+
+			public boolean isRequestAttributesEnabled() {
+				return this.requestAttributesEnabled;
+			}
+
+			public void setRequestAttributesEnabled(boolean requestAttributesEnabled) {
+				this.requestAttributesEnabled = requestAttributesEnabled;
+			}
+
+			public boolean isBuffered() {
+				return this.buffered;
+			}
+
+			public void setBuffered(boolean buffered) {
+				this.buffered = buffered;
+			}
+
 		}
 
 	}
 
-	private static class Jetty {
+	public static class Jetty {
 
-		void customizeJetty(ServerProperties serverProperties,
+		/**
+		 * Maximum size in bytes of the HTTP post or put content.
+		 */
+		private int maxHttpPostSize = 0; // bytes
+
+		/**
+		 * Number of acceptor threads to use.
+		 */
+		private Integer acceptors;
+
+		/**
+		 * Number of selector threads to use.
+		 */
+		private Integer selectors;
+
+		public int getMaxHttpPostSize() {
+			return this.maxHttpPostSize;
+		}
+
+		public void setMaxHttpPostSize(int maxHttpPostSize) {
+			this.maxHttpPostSize = maxHttpPostSize;
+		}
+
+		public Integer getAcceptors() {
+			return this.acceptors;
+		}
+
+		public void setAcceptors(Integer acceptors) {
+			this.acceptors = acceptors;
+		}
+
+		public Integer getSelectors() {
+			return this.selectors;
+		}
+
+		public void setSelectors(Integer selectors) {
+			this.selectors = selectors;
+		}
+
+		void customizeJetty(final ServerProperties serverProperties,
 				JettyEmbeddedServletContainerFactory factory) {
 			factory.setUseForwardHeaders(serverProperties.getOrDeduceUseForwardHeaders());
+			if (this.acceptors != null) {
+				factory.setAcceptors(this.acceptors);
+			}
+			if (this.selectors != null) {
+				factory.setSelectors(this.selectors);
+			}
+			if (serverProperties.getMaxHttpHeaderSize() > 0) {
+				customizeMaxHttpHeaderSize(factory,
+						serverProperties.getMaxHttpHeaderSize());
+			}
+			if (this.maxHttpPostSize > 0) {
+				customizeMaxHttpPostSize(factory, this.maxHttpPostSize);
+			}
+
+			if (serverProperties.getConnectionTimeout() != null) {
+				customizeConnectionTimeout(factory,
+						serverProperties.getConnectionTimeout());
+			}
+		}
+
+		private void customizeConnectionTimeout(
+				JettyEmbeddedServletContainerFactory factory,
+				final int connectionTimeout) {
+			factory.addServerCustomizers(new JettyServerCustomizer() {
+
+				@Override
+				public void customize(Server server) {
+					for (org.eclipse.jetty.server.Connector connector : server
+							.getConnectors()) {
+						if (connector instanceof AbstractConnector) {
+							((AbstractConnector) connector)
+									.setIdleTimeout(connectionTimeout);
+						}
+					}
+				}
+
+			});
+		}
+
+		private void customizeMaxHttpHeaderSize(
+				JettyEmbeddedServletContainerFactory factory,
+				final int maxHttpHeaderSize) {
+			factory.addServerCustomizers(new JettyServerCustomizer() {
+
+				@Override
+				public void customize(Server server) {
+					for (org.eclipse.jetty.server.Connector connector : server
+							.getConnectors()) {
+						try {
+							for (ConnectionFactory connectionFactory : connector
+									.getConnectionFactories()) {
+								if (connectionFactory instanceof HttpConfiguration.ConnectionFactory) {
+									customize(
+											(HttpConfiguration.ConnectionFactory) connectionFactory);
+								}
+							}
+						}
+						catch (NoSuchMethodError ex) {
+							customizeOnJetty8(connector, maxHttpHeaderSize);
+						}
+					}
+
+				}
+
+				private void customize(HttpConfiguration.ConnectionFactory factory) {
+					HttpConfiguration configuration = factory.getHttpConfiguration();
+					configuration.setRequestHeaderSize(maxHttpHeaderSize);
+					configuration.setResponseHeaderSize(maxHttpHeaderSize);
+				}
+
+				private void customizeOnJetty8(
+						org.eclipse.jetty.server.Connector connector,
+						int maxHttpHeaderSize) {
+					try {
+						connector.getClass().getMethod("setRequestHeaderSize", int.class)
+								.invoke(connector, maxHttpHeaderSize);
+						connector.getClass().getMethod("setResponseHeaderSize", int.class)
+								.invoke(connector, maxHttpHeaderSize);
+					}
+					catch (Exception ex) {
+						throw new RuntimeException(ex);
+					}
+				}
+
+			});
+		}
+
+		private void customizeMaxHttpPostSize(
+				JettyEmbeddedServletContainerFactory factory, final int maxHttpPostSize) {
+			factory.addServerCustomizers(new JettyServerCustomizer() {
+
+				@Override
+				public void customize(Server server) {
+					setHandlerMaxHttpPostSize(maxHttpPostSize, server.getHandlers());
+				}
+
+				private void setHandlerMaxHttpPostSize(int maxHttpPostSize,
+						Handler... handlers) {
+					for (Handler handler : handlers) {
+						if (handler instanceof ContextHandler) {
+							((ContextHandler) handler)
+									.setMaxFormContentSize(maxHttpPostSize);
+						}
+						else if (handler instanceof HandlerWrapper) {
+							setHandlerMaxHttpPostSize(maxHttpPostSize,
+									((HandlerWrapper) handler).getHandler());
+						}
+						else if (handler instanceof HandlerCollection) {
+							setHandlerMaxHttpPostSize(maxHttpPostSize,
+									((HandlerCollection) handler).getHandlers());
+						}
+					}
+				}
+
+			});
 		}
 
 	}
 
 	public static class Undertow {
+
+		/**
+		 * Maximum size in bytes of the HTTP post content.
+		 */
+		private long maxHttpPostSize = 0; // bytes
 
 		/**
 		 * Size of each buffer in bytes.
@@ -863,6 +1306,7 @@ public class ServerProperties
 		/**
 		 * Number of buffer per region.
 		 */
+		@Deprecated
 		private Integer buffersPerRegion;
 
 		/**
@@ -882,6 +1326,14 @@ public class ServerProperties
 
 		private final Accesslog accesslog = new Accesslog();
 
+		public long getMaxHttpPostSize() {
+			return this.maxHttpPostSize;
+		}
+
+		public void setMaxHttpPostSize(long maxHttpPostSize) {
+			this.maxHttpPostSize = maxHttpPostSize;
+		}
+
 		public Integer getBufferSize() {
 			return this.bufferSize;
 		}
@@ -890,6 +1342,7 @@ public class ServerProperties
 			this.bufferSize = bufferSize;
 		}
 
+		@DeprecatedConfigurationProperty(reason = "The property is not used by Undertow. See https://issues.jboss.org/browse/UNDERTOW-587 for details")
 		public Integer getBuffersPerRegion() {
 			return this.buffersPerRegion;
 		}
@@ -926,17 +1379,81 @@ public class ServerProperties
 			return this.accesslog;
 		}
 
-		void customizeUndertow(ServerProperties serverProperties,
+		void customizeUndertow(final ServerProperties serverProperties,
 				UndertowEmbeddedServletContainerFactory factory) {
-			factory.setBufferSize(this.bufferSize);
-			factory.setBuffersPerRegion(this.buffersPerRegion);
-			factory.setIoThreads(this.ioThreads);
-			factory.setWorkerThreads(this.workerThreads);
-			factory.setDirectBuffers(this.directBuffers);
+			if (this.bufferSize != null) {
+				factory.setBufferSize(this.bufferSize);
+			}
+			if (this.ioThreads != null) {
+				factory.setIoThreads(this.ioThreads);
+			}
+			if (this.workerThreads != null) {
+				factory.setWorkerThreads(this.workerThreads);
+			}
+			if (this.directBuffers != null) {
+				factory.setDirectBuffers(this.directBuffers);
+			}
+			if (this.accesslog.enabled != null) {
+				factory.setAccessLogEnabled(this.accesslog.enabled);
+			}
 			factory.setAccessLogDirectory(this.accesslog.dir);
 			factory.setAccessLogPattern(this.accesslog.pattern);
-			factory.setAccessLogEnabled(this.accesslog.enabled);
+			factory.setAccessLogPrefix(this.accesslog.prefix);
+			factory.setAccessLogSuffix(this.accesslog.suffix);
+			factory.setAccessLogRotate(this.accesslog.rotate);
 			factory.setUseForwardHeaders(serverProperties.getOrDeduceUseForwardHeaders());
+			if (serverProperties.getMaxHttpHeaderSize() > 0) {
+				customizeMaxHttpHeaderSize(factory,
+						serverProperties.getMaxHttpHeaderSize());
+			}
+			if (this.maxHttpPostSize > 0) {
+				customizeMaxHttpPostSize(factory, this.maxHttpPostSize);
+			}
+
+			if (serverProperties.getConnectionTimeout() != null) {
+				customizeConnectionTimeout(factory,
+						serverProperties.getConnectionTimeout());
+			}
+		}
+
+		private void customizeConnectionTimeout(
+				UndertowEmbeddedServletContainerFactory factory,
+				final int connectionTimeout) {
+			factory.addBuilderCustomizers(new UndertowBuilderCustomizer() {
+				@Override
+				public void customize(Builder builder) {
+					builder.setSocketOption(UndertowOptions.NO_REQUEST_TIMEOUT,
+							connectionTimeout);
+				}
+			});
+		}
+
+		private void customizeMaxHttpHeaderSize(
+				UndertowEmbeddedServletContainerFactory factory,
+				final int maxHttpHeaderSize) {
+			factory.addBuilderCustomizers(new UndertowBuilderCustomizer() {
+
+				@Override
+				public void customize(Builder builder) {
+					builder.setServerOption(UndertowOptions.MAX_HEADER_SIZE,
+							maxHttpHeaderSize);
+				}
+
+			});
+		}
+
+		private void customizeMaxHttpPostSize(
+				UndertowEmbeddedServletContainerFactory factory,
+				final long maxHttpPostSize) {
+			factory.addBuilderCustomizers(new UndertowBuilderCustomizer() {
+
+				@Override
+				public void customize(Builder builder) {
+					builder.setServerOption(UndertowOptions.MAX_ENTITY_SIZE,
+							maxHttpPostSize);
+				}
+
+			});
 		}
 
 		public static class Accesslog {
@@ -944,7 +1461,7 @@ public class ServerProperties
 			/**
 			 * Enable access log.
 			 */
-			private boolean enabled = false;
+			private Boolean enabled;
 
 			/**
 			 * Format pattern for access logs.
@@ -952,15 +1469,30 @@ public class ServerProperties
 			private String pattern = "common";
 
 			/**
+			 * Log file name prefix.
+			 */
+			protected String prefix = "access_log.";
+
+			/**
+			 * Log file name suffix.
+			 */
+			private String suffix = "log";
+
+			/**
 			 * Undertow access log directory.
 			 */
 			private File dir = new File("logs");
 
-			public boolean isEnabled() {
+			/**
+			 * Enable access log rotation.
+			 */
+			private boolean rotate = true;
+
+			public Boolean getEnabled() {
 				return this.enabled;
 			}
 
-			public void setEnabled(boolean enabled) {
+			public void setEnabled(Boolean enabled) {
 				this.enabled = enabled;
 			}
 
@@ -972,6 +1504,22 @@ public class ServerProperties
 				this.pattern = pattern;
 			}
 
+			public String getPrefix() {
+				return this.prefix;
+			}
+
+			public void setPrefix(String prefix) {
+				this.prefix = prefix;
+			}
+
+			public String getSuffix() {
+				return this.suffix;
+			}
+
+			public void setSuffix(String suffix) {
+				this.suffix = suffix;
+			}
+
 			public File getDir() {
 				return this.dir;
 			}
@@ -980,6 +1528,13 @@ public class ServerProperties
 				this.dir = dir;
 			}
 
+			public boolean isRotate() {
+				return this.rotate;
+			}
+
+			public void setRotate(boolean rotate) {
+				this.rotate = rotate;
+			}
 		}
 
 	}

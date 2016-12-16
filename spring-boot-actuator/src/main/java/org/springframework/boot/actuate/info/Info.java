@@ -16,6 +16,7 @@
 
 package org.springframework.boot.actuate.info;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,7 +27,7 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 /**
  * Carries information of the application.
  * <p>
- * Each detail element can be singular or a hierarchical object such as a pojo or a nested
+ * Each detail element can be singular or a hierarchical object such as a POJO or a nested
  * Map.
  *
  * @author Meang Akira Tanaka
@@ -39,8 +40,9 @@ public final class Info {
 	private final Map<String, Object> details;
 
 	private Info(Builder builder) {
-		this.details = new LinkedHashMap<String, Object>();
-		this.details.putAll(builder.content);
+		LinkedHashMap<String, Object> content = new LinkedHashMap<String, Object>();
+		content.putAll(builder.content);
+		this.details = Collections.unmodifiableMap(content);
 	}
 
 	/**
@@ -100,13 +102,13 @@ public final class Info {
 		}
 
 		/**
-		 * Record detail using {@code key} and {@code value}.
+		 * Record detail using given {@code key} and {@code value}.
 		 * @param key the detail key
-		 * @param data the detail data
+		 * @param value the detail value
 		 * @return this {@link Builder} instance
 		 */
-		public Builder withDetail(String key, Object data) {
-			this.content.put(key, data);
+		public Builder withDetail(String key, Object value) {
+			this.content.put(key, value);
 			return this;
 		}
 
@@ -122,7 +124,7 @@ public final class Info {
 		}
 
 		/**
-		 * Create a new {@link Info} instance base on the state of this builder.
+		 * Create a new {@link Info} instance based on the state of this builder.
 		 * @return a new {@link Info} instance
 		 */
 		public Info build() {

@@ -16,14 +16,12 @@
 
 package org.springframework.boot.loader;
 
-import java.util.List;
-
 import org.springframework.boot.loader.archive.Archive;
 
 /**
  * {@link Launcher} for JAR based archives. This launcher assumes that dependency jars are
- * included inside a {@code /BOOT-INF/lib} and that application classes are included
- * inside a {@code /BOOT-INF/classes} directory.
+ * included inside a {@code /BOOT-INF/lib} directory and that application classes are
+ * included inside a {@code /BOOT-INF/classes} directory.
  *
  * @author Phillip Webb
  * @author Andy Wilkinson
@@ -44,14 +42,9 @@ public class JarLauncher extends ExecutableArchiveLauncher {
 	@Override
 	protected boolean isNestedArchive(Archive.Entry entry) {
 		if (entry.isDirectory()) {
-			return entry.getName().startsWith(BOOT_INF_CLASSES);
+			return entry.getName().equals(BOOT_INF_CLASSES);
 		}
 		return entry.getName().startsWith(BOOT_INF_LIB);
-	}
-
-	@Override
-	protected void postProcessClassPathArchives(List<Archive> archives) throws Exception {
-		archives.add(0, getArchive());
 	}
 
 	public static void main(String[] args) throws Exception {

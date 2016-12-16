@@ -81,11 +81,13 @@ public class LocalHostWebConnectionHtmlUnitDriverTests {
 			throws Exception {
 		this.thrown.expect(IllegalArgumentException.class);
 		this.thrown.expectMessage("Environment must not be null");
-		new LocalHostWebConnectionHtmlUnitDriver(null, mock(Capabilities.class));
+		Capabilities capabilities = mock(Capabilities.class);
+		given(capabilities.getBrowserName()).willReturn("chrome");
+		new LocalHostWebConnectionHtmlUnitDriver(null, capabilities);
 	}
 
 	@Test
-	public void getPageWhenUrlIsRelativeAndNoPortWillUseLocalhost8080() throws Exception {
+	public void getWhenUrlIsRelativeAndNoPortWillUseLocalhost8080() throws Exception {
 		MockEnvironment environment = new MockEnvironment();
 		LocalHostWebConnectionHtmlUnitDriver driver = new TestLocalHostWebConnectionHtmlUnitDriver(
 				environment);

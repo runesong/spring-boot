@@ -21,11 +21,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringApplicationConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit4.SpringRunner;
-import org.springframework.test.context.web.WebAppConfiguration;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -37,8 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @RunWith(SpringRunner.class)
-@SpringApplicationConfiguration(SampleHypermediaJpaApplication.class)
-@WebAppConfiguration
+@SpringBootTest
 @DirtiesContext
 public class SampleHypermediaJpaApplicationIntegrationTests {
 
@@ -84,7 +82,7 @@ public class SampleHypermediaJpaApplicationIntegrationTests {
 		MvcResult response = this.mockMvc.perform(get("/").accept(MediaType.TEXT_HTML))
 				.andExpect(status().isFound()).andReturn();
 		assertThat(response.getResponse().getHeaders("location").get(0))
-				.isEqualTo("/browser/index.html#");
+				.isEqualTo("http://localhost/browser/index.html#/");
 	}
 
 }

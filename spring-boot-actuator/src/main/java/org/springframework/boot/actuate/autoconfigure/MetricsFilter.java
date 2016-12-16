@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.servlet.FilterChain;
@@ -61,11 +60,13 @@ final class MetricsFilter extends OncePerRequestFilter {
 
 	private final GaugeService gaugeService;
 
+	private final MetricFilterProperties properties;
+
 	private static final Set<PatternReplacer> STATUS_REPLACERS;
 
 	static {
 		Set<PatternReplacer> replacements = new LinkedHashSet<PatternReplacer>();
-		replacements.add(new PatternReplacer("[{}]", 0, "-"));
+		replacements.add(new PatternReplacer("\\{(.+?)(?::.+)?\\}", 0, "-$1-"));
 		replacements.add(new PatternReplacer("**", Pattern.LITERAL, "-star-star-"));
 		replacements.add(new PatternReplacer("*", Pattern.LITERAL, "-star-"));
 		replacements.add(new PatternReplacer("/-", Pattern.LITERAL, "/"));
@@ -82,9 +83,11 @@ final class MetricsFilter extends OncePerRequestFilter {
 		KEY_REPLACERS = Collections.unmodifiableSet(replacements);
 	}
 
-	MetricsFilter(CounterService counterService, GaugeService gaugeService) {
+	MetricsFilter(CounterService counterService, GaugeService gaugeService,
+			MetricFilterProperties properties) {
 		this.counterService = counterService;
 		this.gaugeService = gaugeService;
+		this.properties = properties;
 	}
 
 	@Override
@@ -105,6 +108,9 @@ final class MetricsFilter extends OncePerRequestFilter {
 		}
 		finally {
 			if (!request.isAsyncStarted()) {
+				if (response.isCommitted()) {
+					status = getStatus(response);
+				}
 				stopWatch.stop();
 				request.removeAttribute(ATTRIBUTE_STOP_WATCH);
 				recordMetrics(request, path, status, stopWatch.getTotalTimeMillis());
@@ -133,12 +139,13 @@ final class MetricsFilter extends OncePerRequestFilter {
 
 	private void recordMetrics(HttpServletRequest request, String path, int status,
 			long time) {
-		String suffix = getFinalStatus(request, path, status);
-		submitToGauge(getKey("response" + suffix), time);
-		incrementCounter(getKey("status." + status + suffix));
+		String suffix = determineMetricNameSuffix(request, path, status);
+		submitMetrics(MetricsFilterSubmission.MERGED, request, status, time, suffix);
+		submitMetrics(MetricsFilterSubmission.PER_HTTP_METHOD, request, status, time,
+				suffix);
 	}
 
-	private String getFinalStatus(HttpServletRequest request, String path, int status) {
+	private String determineMetricNameSuffix(HttpServletRequest request, String path, int status) {
 		Object bestMatchingPattern = request
 				.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
 		if (bestMatchingPattern != null) {
@@ -173,7 +180,20 @@ final class MetricsFilter extends OncePerRequestFilter {
 		catch (Exception ex) {
 			return null;
 		}
+	}
 
+	private void submitMetrics(MetricsFilterSubmission submission,
+			HttpServletRequest request, int status, long time, String suffix) {
+		String prefix = "";
+		if (submission == MetricsFilterSubmission.PER_HTTP_METHOD) {
+			prefix = request.getMethod() + ".";
+		}
+		if (this.properties.shouldSubmitToGauge(submission)) {
+			submitToGauge(getKey("response." + prefix + suffix), time);
+		}
+		if (this.properties.shouldSubmitToCounter(submission)) {
+			incrementCounter(getKey("status." + prefix + status + suffix));
+		}
 	}
 
 	private String getKey(String string) {
@@ -221,8 +241,7 @@ final class MetricsFilter extends OncePerRequestFilter {
 		}
 
 		public String apply(String input) {
-			return this.pattern.matcher(input)
-					.replaceAll(Matcher.quoteReplacement(this.replacement));
+			return this.pattern.matcher(input).replaceAll(this.replacement);
 		}
 
 	}

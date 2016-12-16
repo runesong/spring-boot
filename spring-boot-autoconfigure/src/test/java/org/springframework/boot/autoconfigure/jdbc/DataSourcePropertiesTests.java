@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * @author Maciej Walkowiak
  * @author Stephane Nicoll
+ * @author Eddú Meléndez
  */
 public class DataSourcePropertiesTests {
 
@@ -66,6 +67,19 @@ public class DataSourcePropertiesTests {
 	}
 
 	@Test
+	public void determineUrlWithGenerateUniqueName() throws Exception {
+		DataSourceProperties properties = new DataSourceProperties();
+		properties.setGenerateUniqueName(true);
+		properties.afterPropertiesSet();
+		assertThat(properties.determineUrl()).isEqualTo(properties.determineUrl());
+
+		DataSourceProperties properties2 = new DataSourceProperties();
+		properties2.setGenerateUniqueName(true);
+		properties2.afterPropertiesSet();
+		assertThat(properties.determineUrl()).isNotEqualTo(properties2.determineUrl());
+	}
+
+	@Test
 	public void determineUsername() throws Exception {
 		DataSourceProperties properties = new DataSourceProperties();
 		properties.afterPropertiesSet();
@@ -97,6 +111,24 @@ public class DataSourcePropertiesTests {
 		properties.afterPropertiesSet();
 		assertThat(properties.getPassword()).isEqualTo("bar");
 		assertThat(properties.determinePassword()).isEqualTo("bar");
+	}
+
+	@Test
+	public void determineCredentialsForSchemaScripts() {
+		DataSourceProperties properties = new DataSourceProperties();
+		properties.setSchemaUsername("foo");
+		properties.setSchemaPassword("bar");
+		assertThat(properties.getSchemaUsername()).isEqualTo("foo");
+		assertThat(properties.getSchemaPassword()).isEqualTo("bar");
+	}
+
+	@Test
+	public void determineCredentialsForDataScripts() {
+		DataSourceProperties properties = new DataSourceProperties();
+		properties.setDataUsername("foo");
+		properties.setDataPassword("bar");
+		assertThat(properties.getDataUsername()).isEqualTo("foo");
+		assertThat(properties.getDataPassword()).isEqualTo("bar");
 	}
 
 }

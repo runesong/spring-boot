@@ -90,18 +90,18 @@ public class RabbitAutoConfiguration {
 		public CachingConnectionFactory rabbitConnectionFactory(RabbitProperties config)
 				throws Exception {
 			RabbitConnectionFactoryBean factory = new RabbitConnectionFactoryBean();
-			if (config.getHost() != null) {
-				factory.setHost(config.getHost());
-				factory.setPort(config.getPort());
+			if (config.determineHost() != null) {
+				factory.setHost(config.determineHost());
 			}
-			if (config.getUsername() != null) {
-				factory.setUsername(config.getUsername());
+			factory.setPort(config.determinePort());
+			if (config.determineUsername() != null) {
+				factory.setUsername(config.determineUsername());
 			}
-			if (config.getPassword() != null) {
-				factory.setPassword(config.getPassword());
+			if (config.determinePassword() != null) {
+				factory.setPassword(config.determinePassword());
 			}
-			if (config.getVirtualHost() != null) {
-				factory.setVirtualHost(config.getVirtualHost());
+			if (config.determineVirtualHost() != null) {
+				factory.setVirtualHost(config.determineVirtualHost());
 			}
 			if (config.getRequestedHeartbeat() != null) {
 				factory.setRequestedHeartbeat(config.getRequestedHeartbeat());
@@ -109,15 +109,23 @@ public class RabbitAutoConfiguration {
 			RabbitProperties.Ssl ssl = config.getSsl();
 			if (ssl.isEnabled()) {
 				factory.setUseSSL(true);
+				if (ssl.getAlgorithm() != null) {
+					factory.setSslAlgorithm(ssl.getAlgorithm());
+				}
 				factory.setKeyStore(ssl.getKeyStore());
 				factory.setKeyStorePassphrase(ssl.getKeyStorePassword());
 				factory.setTrustStore(ssl.getTrustStore());
 				factory.setTrustStorePassphrase(ssl.getTrustStorePassword());
 			}
+			if (config.getConnectionTimeout() != null) {
+				factory.setConnectionTimeout(config.getConnectionTimeout());
+			}
 			factory.afterPropertiesSet();
 			CachingConnectionFactory connectionFactory = new CachingConnectionFactory(
 					factory.getObject());
-			connectionFactory.setAddresses(config.getAddresses());
+			connectionFactory.setAddresses(config.determineAddresses());
+			connectionFactory.setPublisherConfirms(config.isPublisherConfirms());
+			connectionFactory.setPublisherReturns(config.isPublisherReturns());
 			if (config.getCache().getChannel().getSize() != null) {
 				connectionFactory
 						.setChannelCacheSize(config.getCache().getChannel().getSize());
@@ -163,6 +171,7 @@ public class RabbitAutoConfiguration {
 			if (messageConverter != null) {
 				rabbitTemplate.setMessageConverter(messageConverter);
 			}
+			rabbitTemplate.setMandatory(determineMandatoryFlag());
 			RabbitProperties.Template templateProperties = this.properties.getTemplate();
 			RabbitProperties.Retry retryProperties = templateProperties.getRetry();
 			if (retryProperties.isEnabled()) {
@@ -175,6 +184,11 @@ public class RabbitAutoConfiguration {
 				rabbitTemplate.setReplyTimeout(templateProperties.getReplyTimeout());
 			}
 			return rabbitTemplate;
+		}
+
+		private boolean determineMandatoryFlag() {
+			Boolean mandatory = this.properties.getTemplate().getMandatory();
+			return (mandatory != null ? mandatory : this.properties.isPublisherReturns());
 		}
 
 		private RetryTemplate createRetryTemplate(RabbitProperties.Retry properties) {

@@ -21,7 +21,6 @@ import com.couchbase.client.java.Cluster;
 import com.couchbase.client.java.CouchbaseBucket;
 import com.couchbase.client.java.CouchbaseCluster;
 import com.couchbase.client.java.cluster.ClusterInfo;
-import com.couchbase.client.java.env.CouchbaseEnvironment;
 import com.couchbase.client.java.env.DefaultCouchbaseEnvironment;
 
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -29,13 +28,11 @@ import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
-import org.springframework.data.couchbase.config.CouchbaseConfigurer;
 
 /**
  * {@link EnableAutoConfiguration Auto-Configuration} for Couchbase.
@@ -51,7 +48,7 @@ import org.springframework.data.couchbase.config.CouchbaseConfigurer;
 public class CouchbaseAutoConfiguration {
 
 	@Configuration
-	@ConditionalOnMissingBean(CouchbaseConfigurer.class)
+	@ConditionalOnMissingBean(value = CouchbaseConfiguration.class, type = "org.springframework.data.couchbase.config.CouchbaseConfigurer")
 	public static class CouchbaseConfiguration {
 
 		private final CouchbaseProperties properties;
@@ -62,8 +59,8 @@ public class CouchbaseAutoConfiguration {
 
 		@Bean
 		@Primary
-		public CouchbaseEnvironment couchbaseEnvironment() throws Exception {
-			return createEnvironment(this.properties);
+		public DefaultCouchbaseEnvironment couchbaseEnvironment() throws Exception {
+			return initializeEnvironmentBuilder(this.properties).build();
 		}
 
 		@Bean
@@ -90,11 +87,12 @@ public class CouchbaseAutoConfiguration {
 		}
 
 		/**
-		 * Create a {@link CouchbaseEnvironment} based on the specified settings.
+		 * Initialize an environment builder based on the specified settings.
 		 * @param properties the couchbase properties to use
-		 * @return a {@link CouchbaseEnvironment}
+		 * @return the {@link DefaultCouchbaseEnvironment} builder.
 		 */
-		protected CouchbaseEnvironment createEnvironment(CouchbaseProperties properties) {
+		protected DefaultCouchbaseEnvironment.Builder initializeEnvironmentBuilder(
+				CouchbaseProperties properties) {
 			CouchbaseProperties.Endpoints endpoints = properties.getEnv().getEndpoints();
 			CouchbaseProperties.Timeouts timeouts = properties.getEnv().getTimeouts();
 			DefaultCouchbaseEnvironment.Builder builder = DefaultCouchbaseEnvironment
@@ -103,6 +101,7 @@ public class CouchbaseAutoConfiguration {
 					.kvTimeout(timeouts.getKeyValue())
 					.queryEndpoints(endpoints.getQuery())
 					.queryTimeout(timeouts.getQuery()).viewEndpoints(endpoints.getView())
+					.socketConnectTimeout(timeouts.getSocketConnect())
 					.viewTimeout(timeouts.getView());
 			CouchbaseProperties.Ssl ssl = properties.getEnv().getSsl();
 			if (ssl.getEnabled()) {
@@ -114,15 +113,18 @@ public class CouchbaseAutoConfiguration {
 					builder.sslKeystorePassword(ssl.getKeyStorePassword());
 				}
 			}
-			return builder.build();
+			return builder;
 		}
 
 	}
 
 	/**
 	 * Determine if Couchbase should be configured. This happens if either the
-	 * user-configuration defines a {@link CouchbaseConfigurer} or if at least the
+	 * user-configuration defines a {@code CouchbaseConfigurer} or if at least the
 	 * "bootstrapHosts" property is specified.
+	 * <p>
+	 * The reason why we check for the presence of {@code CouchbaseConfigurer} is that it
+	 * might use {@link CouchbaseProperties} for its internal customization.
 	 */
 	static class CouchbaseCondition extends AnyNestedCondition {
 
@@ -130,11 +132,11 @@ public class CouchbaseAutoConfiguration {
 			super(ConfigurationPhase.REGISTER_BEAN);
 		}
 
-		@ConditionalOnProperty(prefix = "spring.couchbase", name = "bootstrapHosts")
+		@Conditional(OnBootstrapHostsCondition.class)
 		static class BootstrapHostsProperty {
 		}
 
-		@ConditionalOnBean(CouchbaseConfigurer.class)
+		@ConditionalOnBean(type = "org.springframework.data.couchbase.config.CouchbaseConfigurer")
 		static class CouchbaseConfigurerAvailable {
 		}
 

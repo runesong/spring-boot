@@ -19,12 +19,12 @@ import java.util.List;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import sample.jpa.SampleJpaApplication;
 import sample.jpa.domain.Tag;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringApplicationConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,7 +34,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Andy Wilkinson
  */
 @RunWith(SpringRunner.class)
-@SpringApplicationConfiguration(SampleJpaApplication.class)
+@SpringBootTest
+@Transactional
 public class JpaTagRepositoryIntegrationTests {
 
 	@Autowired
@@ -44,6 +45,9 @@ public class JpaTagRepositoryIntegrationTests {
 	public void findsAllTags() {
 		List<Tag> tags = this.repository.findAll();
 		assertThat(tags).hasSize(3);
+		for (Tag tag : tags) {
+			assertThat(tag.getNotes().size()).isGreaterThan(0);
+		}
 	}
 
 }

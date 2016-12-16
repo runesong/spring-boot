@@ -23,6 +23,7 @@ import java.nio.charset.Charset;
  * reasons to save constructing Strings for ZIP data.
  *
  * @author Phillip Webb
+ * @author Andy Wilkinson
  */
 final class AsciiBytes {
 
@@ -113,7 +114,7 @@ final class AsciiBytes {
 
 	public AsciiBytes substring(int beginIndex, int endIndex) {
 		int length = endIndex - beginIndex;
-		if (this.offset + length > this.length) {
+		if (this.offset + length > this.bytes.length) {
 			throw new IndexOutOfBoundsException();
 		}
 		return new AsciiBytes(this.bytes, this.offset + beginIndex, length);
@@ -156,21 +157,35 @@ final class AsciiBytes {
 		int hash = this.hash;
 		if (hash == 0 && this.bytes.length > 0) {
 			for (int i = this.offset; i < this.offset + this.length; i++) {
-				int b = this.bytes[i] & 0xff;
-				if (b > 0x7F) {
-					// Decode multi-byte UTF
-					for (int size = 0; size < 3; size++) {
-						if ((b & (0x40 >> size)) == 0) {
-							b = b & (0x1F >> size);
-							for (int j = 0; j < size; j++) {
-								b <<= 6;
-								b |= this.bytes[++i] & 0x3F;
-							}
-							break;
-						}
+				int b = this.bytes[i];
+				if (b < 0) {
+					b = b & 0x7F;
+					int limit;
+					int excess = 0x80;
+					if (b < 96) {
+						limit = 1;
+						excess += 0x40 << 6;
 					}
+					else if (b < 112) {
+						limit = 2;
+						excess += (0x60 << 12) + (0x80 << 6);
+					}
+					else {
+						limit = 3;
+						excess += (0x70 << 18) + (0x80 << 12) + (0x80 << 6);
+					}
+					for (int j = 0; j < limit; j++) {
+						b = (b << 6) + (this.bytes[++i] & 0xFF);
+					}
+					b -= excess;
 				}
-				hash = 31 * hash + b;
+				if (b <= 0xFFFF) {
+					hash = 31 * hash + b;
+				}
+				else {
+					hash = 31 * hash + ((b >> 0xA) + 0xD7C0);
+					hash = 31 * hash + ((b & 0x3FF) + 0xDC00);
+				}
 			}
 			this.hash = hash;
 		}
@@ -197,6 +212,10 @@ final class AsciiBytes {
 			}
 		}
 		return false;
+	}
+
+	static String toString(byte[] bytes) {
+		return new String(bytes, UTF_8);
 	}
 
 	public static int hashCode(String string) {

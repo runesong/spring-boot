@@ -19,9 +19,11 @@ package org.springframework.boot.context.embedded.undertow;
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,15 +34,17 @@ import io.undertow.Undertow.Builder;
 import io.undertow.servlet.api.DeploymentInfo;
 import io.undertow.servlet.api.DeploymentManager;
 import io.undertow.servlet.api.ServletContainer;
+import org.apache.jasper.servlet.JspServlet;
 import org.junit.Test;
 import org.mockito.InOrder;
 
 import org.springframework.boot.context.embedded.AbstractEmbeddedServletContainerFactory;
 import org.springframework.boot.context.embedded.AbstractEmbeddedServletContainerFactoryTests;
-import org.springframework.boot.context.embedded.ErrorPage;
 import org.springframework.boot.context.embedded.ExampleServlet;
 import org.springframework.boot.context.embedded.MimeMappings.Mapping;
-import org.springframework.boot.context.embedded.ServletRegistrationBean;
+import org.springframework.boot.context.embedded.PortInUseException;
+import org.springframework.boot.web.servlet.ErrorPage;
+import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -176,8 +180,21 @@ public class UndertowEmbeddedServletContainerFactoryTests
 	@Test
 	public void accessLogCanBeEnabled()
 			throws IOException, URISyntaxException, InterruptedException {
+		testAccessLog(null, null, "access_log.log");
+	}
+
+	@Test
+	public void accessLogCanBeCustomized()
+			throws IOException, URISyntaxException, InterruptedException {
+		testAccessLog("my_access.", "logz", "my_access.logz");
+	}
+
+	private void testAccessLog(String prefix, String suffix, String expectedFile)
+			throws IOException, URISyntaxException, InterruptedException {
 		UndertowEmbeddedServletContainerFactory factory = getFactory();
 		factory.setAccessLogEnabled(true);
+		factory.setAccessLogPrefix(prefix);
+		factory.setAccessLogSuffix(suffix);
 		File accessLogDirectory = this.temporaryFolder.getRoot();
 		factory.setAccessLogDirectory(accessLogDirectory);
 		assertThat(accessLogDirectory.listFiles()).isEmpty();
@@ -185,7 +202,7 @@ public class UndertowEmbeddedServletContainerFactoryTests
 				new ServletRegistrationBean(new ExampleServlet(), "/hello"));
 		this.container.start();
 		assertThat(getResponse(getLocalUrl("/hello"))).isEqualTo("Hello World");
-		File accessLog = new File(accessLogDirectory, "access_log.log");
+		File accessLog = new File(accessLogDirectory, expectedFile);
 		awaitFile(accessLog);
 		assertThat(accessLogDirectory.listFiles()).contains(accessLog);
 	}
@@ -234,7 +251,7 @@ public class UndertowEmbeddedServletContainerFactoryTests
 	}
 
 	@Override
-	protected Object getJspServlet() {
+	protected JspServlet getJspServlet() {
 		return null; // Undertow does not support JSPs
 	}
 
@@ -266,6 +283,21 @@ public class UndertowEmbeddedServletContainerFactoryTests
 				super.getExpectedMimeMappings());
 		expectedMappings.add(new Mapping("Z", "application/x-compress"));
 		return expectedMappings;
+	}
+
+	@Override
+	protected Charset getCharset(Locale locale) {
+		DeploymentInfo info = ((DeploymentManager) ReflectionTestUtils
+				.getField(this.container, "manager")).getDeployment().getDeploymentInfo();
+		String charsetName = info.getLocaleCharsetMapping().get(locale.toString());
+		return (charsetName != null) ? Charset.forName(charsetName) : null;
+	}
+
+	@Override
+	protected void handleExceptionCausedByBlockedPort(RuntimeException ex,
+			int blockedPort) {
+		assertThat(ex).isInstanceOf(PortInUseException.class);
+		assertThat(((PortInUseException) ex).getPort()).isEqualTo(blockedPort);
 	}
 
 }

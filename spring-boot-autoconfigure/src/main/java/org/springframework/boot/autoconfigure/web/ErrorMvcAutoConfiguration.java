@@ -27,11 +27,14 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.springframework.aop.framework.autoproxy.AutoProxyUtils;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionMessage;
 import org.springframework.boot.autoconfigure.condition.ConditionOutcome;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -39,16 +42,19 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.autoconfigure.condition.SearchStrategy;
 import org.springframework.boot.autoconfigure.condition.SpringBootCondition;
 import org.springframework.boot.autoconfigure.template.TemplateAvailabilityProvider;
-import org.springframework.boot.context.embedded.ConfigurableEmbeddedServletContainer;
+import org.springframework.boot.autoconfigure.template.TemplateAvailabilityProviders;
 import org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer;
-import org.springframework.boot.context.embedded.ErrorPage;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.ErrorPage;
+import org.springframework.boot.web.servlet.ErrorPageRegistrar;
+import org.springframework.boot.web.servlet.ErrorPageRegistry;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ConditionContext;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.expression.MapAccessor;
 import org.springframework.core.Ordered;
-import org.springframework.core.io.support.SpringFactoriesLoader;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
@@ -68,18 +74,22 @@ import org.springframework.web.util.HtmlUtils;
  * @author Andy Wilkinson
  * @author Stephane Nicoll
  */
-@ConditionalOnClass({ Servlet.class, DispatcherServlet.class })
-@ConditionalOnWebApplication
-// Ensure this loads before the main WebMvcAutoConfiguration so that the error View is
-// available
-@AutoConfigureBefore(WebMvcAutoConfiguration.class)
 @Configuration
+@ConditionalOnWebApplication
+@ConditionalOnClass({ Servlet.class, DispatcherServlet.class })
+// Load before the main WebMvcAutoConfiguration so that the error View is available
+@AutoConfigureBefore(WebMvcAutoConfiguration.class)
+@EnableConfigurationProperties(ResourceProperties.class)
 public class ErrorMvcAutoConfiguration {
 
-	private final ServerProperties properties;
+	private final ServerProperties serverProperties;
 
-	public ErrorMvcAutoConfiguration(ServerProperties properties) {
-		this.properties = properties;
+	private final List<ErrorViewResolver> errorViewResolvers;
+
+	public ErrorMvcAutoConfiguration(ServerProperties serverProperties,
+			ObjectProvider<List<ErrorViewResolver>> errorViewResolversProvider) {
+		this.serverProperties = serverProperties;
+		this.errorViewResolvers = errorViewResolversProvider.getIfAvailable();
 	}
 
 	@Bean
@@ -91,17 +101,41 @@ public class ErrorMvcAutoConfiguration {
 	@Bean
 	@ConditionalOnMissingBean(value = ErrorController.class, search = SearchStrategy.CURRENT)
 	public BasicErrorController basicErrorController(ErrorAttributes errorAttributes) {
-		return new BasicErrorController(errorAttributes, this.properties.getError());
+		return new BasicErrorController(errorAttributes, this.serverProperties.getError(),
+				this.errorViewResolvers);
 	}
 
 	@Bean
 	public ErrorPageCustomizer errorPageCustomizer() {
-		return new ErrorPageCustomizer(this.properties);
+		return new ErrorPageCustomizer(this.serverProperties);
 	}
 
 	@Bean
 	public static PreserveErrorControllerTargetClassPostProcessor preserveErrorControllerTargetClassPostProcessor() {
 		return new PreserveErrorControllerTargetClassPostProcessor();
+	}
+
+	@Configuration
+	static class DefaultErrorViewResolverConfiguration {
+
+		private final ApplicationContext applicationContext;
+
+		private final ResourceProperties resourceProperties;
+
+		DefaultErrorViewResolverConfiguration(ApplicationContext applicationContext,
+				ResourceProperties resourceProperties) {
+			this.applicationContext = applicationContext;
+			this.resourceProperties = resourceProperties;
+		}
+
+		@Bean
+		@ConditionalOnBean(DispatcherServlet.class)
+		@ConditionalOnMissingBean
+		public DefaultErrorViewResolver conventionErrorViewResolver() {
+			return new DefaultErrorViewResolver(this.applicationContext,
+					this.resourceProperties);
+		}
+
 	}
 
 	@Configuration
@@ -142,20 +176,19 @@ public class ErrorMvcAutoConfiguration {
 		@Override
 		public ConditionOutcome getMatchOutcome(ConditionContext context,
 				AnnotatedTypeMetadata metadata) {
-			List<TemplateAvailabilityProvider> availabilityProviders = SpringFactoriesLoader
-					.loadFactories(TemplateAvailabilityProvider.class,
-							context.getClassLoader());
-
-			for (TemplateAvailabilityProvider availabilityProvider : availabilityProviders) {
-				if (availabilityProvider.isTemplateAvailable("error",
-						context.getEnvironment(), context.getClassLoader(),
-						context.getResourceLoader())) {
-					return ConditionOutcome.noMatch("Template from "
-							+ availabilityProvider + " found for error view");
-				}
+			ConditionMessage.Builder message = ConditionMessage
+					.forCondition("ErrorTemplate Missing");
+			TemplateAvailabilityProviders providers = new TemplateAvailabilityProviders(
+					context.getClassLoader());
+			TemplateAvailabilityProvider provider = providers.getProvider("error",
+					context.getEnvironment(), context.getClassLoader(),
+					context.getResourceLoader());
+			if (provider != null) {
+				return ConditionOutcome
+						.noMatch(message.foundExactly("template from " + provider));
 			}
-
-			return ConditionOutcome.match("No error template view detected");
+			return ConditionOutcome
+					.match(message.didNotFind("error template view").atAll());
 		}
 
 	}
@@ -169,14 +202,11 @@ public class ErrorMvcAutoConfiguration {
 
 		private final String template;
 
-		private final Map<String, Expression> expressions;
+		private volatile Map<String, Expression> expressions;
 
 		SpelView(String template) {
 			this.helper = new NonRecursivePropertyPlaceholderHelper("${", "}");
 			this.template = template;
-			ExpressionCollector expressionCollector = new ExpressionCollector();
-			this.helper.replacePlaceholders(this.template, expressionCollector);
-			this.expressions = expressionCollector.getExpressions();
 		}
 
 		@Override
@@ -192,9 +222,20 @@ public class ErrorMvcAutoConfiguration {
 			}
 			Map<String, Object> map = new HashMap<String, Object>(model);
 			map.put("path", request.getContextPath());
-			PlaceholderResolver resolver = new ExpressionResolver(this.expressions, map);
+			PlaceholderResolver resolver = new ExpressionResolver(getExpressions(), map);
 			String result = this.helper.replacePlaceholders(this.template, resolver);
 			response.getWriter().append(result);
+		}
+
+		private Map<String, Expression> getExpressions() {
+			if (this.expressions == null) {
+				synchronized (this) {
+					ExpressionCollector expressionCollector = new ExpressionCollector();
+					this.helper.replacePlaceholders(this.template, expressionCollector);
+					this.expressions = expressionCollector.getExpressions();
+				}
+			}
+			return this.expressions;
 		}
 
 	}
@@ -257,8 +298,7 @@ public class ErrorMvcAutoConfiguration {
 	 * {@link EmbeddedServletContainerCustomizer} that configures the container's error
 	 * pages.
 	 */
-	private static class ErrorPageCustomizer
-			implements EmbeddedServletContainerCustomizer, Ordered {
+	private static class ErrorPageCustomizer implements ErrorPageRegistrar, Ordered {
 
 		private final ServerProperties properties;
 
@@ -267,9 +307,10 @@ public class ErrorMvcAutoConfiguration {
 		}
 
 		@Override
-		public void customize(ConfigurableEmbeddedServletContainer container) {
-			container.addErrorPages(new ErrorPage(this.properties.getServletPrefix()
-					+ this.properties.getError().getPath()));
+		public void registerErrorPages(ErrorPageRegistry errorPageRegistry) {
+			ErrorPage errorPage = new ErrorPage(this.properties.getServletPrefix()
+					+ this.properties.getError().getPath());
+			errorPageRegistry.addErrorPages(errorPage);
 		}
 
 		@Override

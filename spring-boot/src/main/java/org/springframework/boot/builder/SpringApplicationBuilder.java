@@ -46,12 +46,12 @@ import org.springframework.core.io.ResourceLoader;
  * new SpringApplicationBuilder(ParentConfig.class).child(ChildConfig.class).run(args);
  * </pre>
  *
- * Another common use case is setting default arguments, e.g. active Spring profiles, to
- * set up the environment for an application:
+ * Another common use case is setting active profiles and default properties to set up the
+ * environment for an application:
  *
  * <pre class="code">
  * new SpringApplicationBuilder(Application.class).profiles(&quot;server&quot;)
- * 		.defaultArgs(&quot;--transport=local&quot;).run(args);
+ * 		.properties(&quot;transport=local&quot;).run(args);
  * </pre>
  *
  * <p>
@@ -382,18 +382,26 @@ public class SpringApplicationBuilder {
 		return properties(getMapFromKeyValuePairs(defaultProperties));
 	}
 
-	private Map<String, Object> getMapFromKeyValuePairs(String[] args) {
+	private Map<String, Object> getMapFromKeyValuePairs(String[] properties) {
 		Map<String, Object> map = new HashMap<String, Object>();
-		for (String pair : args) {
-			int index = pair.indexOf(":");
-			if (index <= 0) {
-				index = pair.indexOf("=");
-			}
-			String key = pair.substring(0, index > 0 ? index : pair.length());
-			String value = index > 0 ? pair.substring(index + 1) : "";
+		for (String property : properties) {
+			int index = lowestIndexOf(property, ":", "=");
+			String key = property.substring(0, index > 0 ? index : property.length());
+			String value = index > 0 ? property.substring(index + 1) : "";
 			map.put(key, value);
 		}
 		return map;
+	}
+
+	private int lowestIndexOf(String property, String... candidates) {
+		int index = -1;
+		for (String candidate : candidates) {
+			int candidateIndex = property.indexOf(candidate);
+			if (candidateIndex > 0) {
+				index = (index == -1 ? candidateIndex : Math.min(index, candidateIndex));
+			}
+		}
+		return index;
 	}
 
 	/**

@@ -25,21 +25,16 @@ import javax.sql.DataSource;
 import com.couchbase.client.java.Bucket;
 import com.datastax.driver.core.Cluster;
 import org.apache.solr.client.solrj.SolrClient;
-import org.elasticsearch.client.Client;
 
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.health.ApplicationHealthIndicator;
 import org.springframework.boot.actuate.health.CassandraHealthIndicator;
-import org.springframework.boot.actuate.health.CompositeHealthIndicator;
 import org.springframework.boot.actuate.health.CouchbaseHealthIndicator;
 import org.springframework.boot.actuate.health.DataSourceHealthIndicator;
 import org.springframework.boot.actuate.health.DiskSpaceHealthIndicator;
 import org.springframework.boot.actuate.health.DiskSpaceHealthIndicatorProperties;
-import org.springframework.boot.actuate.health.ElasticsearchHealthIndicator;
-import org.springframework.boot.actuate.health.ElasticsearchHealthIndicatorProperties;
 import org.springframework.boot.actuate.health.HealthAggregator;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.actuate.health.JmsHealthIndicator;
@@ -57,11 +52,12 @@ import org.springframework.boot.autoconfigure.cassandra.CassandraAutoConfigurati
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.couchbase.CouchbaseAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.cassandra.CassandraDataAutoConfiguration;
+import org.springframework.boot.autoconfigure.data.couchbase.CouchbaseDataAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.boot.autoconfigure.elasticsearch.jest.JestAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.metadata.DataSourcePoolMetadata;
 import org.springframework.boot.autoconfigure.jdbc.metadata.DataSourcePoolMetadataProvider;
@@ -73,7 +69,7 @@ import org.springframework.boot.autoconfigure.solr.SolrAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.ResolvableType;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.cassandra.core.CassandraOperations;
 import org.springframework.data.couchbase.core.CouchbaseOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -95,13 +91,16 @@ import org.springframework.mail.javamail.JavaMailSenderImpl;
 @Configuration
 @AutoConfigureBefore({ EndpointAutoConfiguration.class })
 @AutoConfigureAfter({ CassandraAutoConfiguration.class,
-		CassandraDataAutoConfiguration.class, CouchbaseAutoConfiguration.class,
-		DataSourceAutoConfiguration.class, MongoAutoConfiguration.class,
-		MongoDataAutoConfiguration.class, RedisAutoConfiguration.class,
-		RabbitAutoConfiguration.class, SolrAutoConfiguration.class,
-		MailSenderAutoConfiguration.class, JmsAutoConfiguration.class,
-		ElasticsearchAutoConfiguration.class })
+		CassandraDataAutoConfiguration.class, CouchbaseDataAutoConfiguration.class,
+		DataSourceAutoConfiguration.class, ElasticsearchAutoConfiguration.class,
+		JestAutoConfiguration.class, JmsAutoConfiguration.class,
+		MailSenderAutoConfiguration.class, MongoAutoConfiguration.class,
+		MongoDataAutoConfiguration.class, RabbitAutoConfiguration.class,
+		RedisAutoConfiguration.class, SolrAutoConfiguration.class })
 @EnableConfigurationProperties({ HealthIndicatorProperties.class })
+@Import({
+		ElasticsearchHealthIndicatorConfiguration.ElasticsearchClientHealthIndicatorConfiguration.class,
+		ElasticsearchHealthIndicatorConfiguration.ElasticsearchJestHealthIndicatorConfiguration.class })
 public class HealthIndicatorAutoConfiguration {
 
 	private final HealthIndicatorProperties properties;
@@ -124,48 +123,6 @@ public class HealthIndicatorAutoConfiguration {
 	@ConditionalOnMissingBean(HealthIndicator.class)
 	public ApplicationHealthIndicator applicationHealthIndicator() {
 		return new ApplicationHealthIndicator();
-	}
-
-	/**
-	 * Base class for configurations that can combine source beans using a
-	 * {@link CompositeHealthIndicator}.
-	 * @param <H> The health indicator type
-	 * @param <S> The bean source type
-	 */
-	protected static abstract class CompositeHealthIndicatorConfiguration<H extends HealthIndicator, S> {
-
-		@Autowired
-		private HealthAggregator healthAggregator;
-
-		protected HealthIndicator createHealthIndicator(Map<String, S> beans) {
-			if (beans.size() == 1) {
-				return createHealthIndicator(beans.values().iterator().next());
-			}
-			CompositeHealthIndicator composite = new CompositeHealthIndicator(
-					this.healthAggregator);
-			for (Map.Entry<String, S> entry : beans.entrySet()) {
-				composite.addHealthIndicator(entry.getKey(),
-						createHealthIndicator(entry.getValue()));
-			}
-			return composite;
-		}
-
-		@SuppressWarnings("unchecked")
-		protected H createHealthIndicator(S source) {
-			Class<?>[] generics = ResolvableType
-					.forClass(CompositeHealthIndicatorConfiguration.class, getClass())
-					.resolveGenerics();
-			Class<H> indicatorClass = (Class<H>) generics[0];
-			Class<S> sourceClass = (Class<S>) generics[1];
-			try {
-				return indicatorClass.getConstructor(sourceClass).newInstance(source);
-			}
-			catch (Exception ex) {
-				throw new IllegalStateException("Unable to create indicator "
-						+ indicatorClass + " for source " + sourceClass, ex);
-			}
-		}
-
 	}
 
 	@Configuration
@@ -397,36 +354,6 @@ public class HealthIndicatorAutoConfiguration {
 		@ConditionalOnMissingBean(name = "jmsHealthIndicator")
 		public HealthIndicator jmsHealthIndicator() {
 			return createHealthIndicator(this.connectionFactories);
-		}
-
-	}
-
-	@Configuration
-	@ConditionalOnBean(Client.class)
-	@ConditionalOnEnabledHealthIndicator("elasticsearch")
-	@EnableConfigurationProperties(ElasticsearchHealthIndicatorProperties.class)
-	public static class ElasticsearchHealthIndicatorConfiguration extends
-			CompositeHealthIndicatorConfiguration<ElasticsearchHealthIndicator, Client> {
-
-		private final Map<String, Client> clients;
-
-		private final ElasticsearchHealthIndicatorProperties properties;
-
-		public ElasticsearchHealthIndicatorConfiguration(Map<String, Client> clients,
-				ElasticsearchHealthIndicatorProperties properties) {
-			this.clients = clients;
-			this.properties = properties;
-		}
-
-		@Bean
-		@ConditionalOnMissingBean(name = "elasticsearchHealthIndicator")
-		public HealthIndicator elasticsearchHealthIndicator() {
-			return createHealthIndicator(this.clients);
-		}
-
-		@Override
-		protected ElasticsearchHealthIndicator createHealthIndicator(Client client) {
-			return new ElasticsearchHealthIndicator(client, this.properties);
 		}
 
 	}

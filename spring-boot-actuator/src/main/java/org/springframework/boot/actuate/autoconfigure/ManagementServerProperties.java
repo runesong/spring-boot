@@ -17,15 +17,18 @@
 package org.springframework.boot.actuate.autoconfigure;
 
 import java.net.InetAddress;
+import java.util.Arrays;
+import java.util.List;
 
+import javax.servlet.http.HttpSession;
 import javax.validation.constraints.NotNull;
 
 import org.springframework.boot.autoconfigure.security.SecurityPrerequisite;
 import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.boot.autoconfigure.web.ServerProperties;
+import org.springframework.boot.context.embedded.Ssl;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.util.ClassUtils;
+import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.util.StringUtils;
 
 /**
@@ -33,12 +36,11 @@ import org.springframework.util.StringUtils;
  *
  * @author Dave Syer
  * @author Stephane Nicoll
+ * @author Vedran Pavic
  * @see ServerProperties
  */
 @ConfigurationProperties(prefix = "management", ignoreUnknownFields = true)
 public class ManagementServerProperties implements SecurityPrerequisite {
-
-	private static final String SECURITY_CHECK_CLASS = "org.springframework.security.config.http.SessionCreationPolicy";
 
 	/**
 	 * Order applied to the WebSecurityConfigurerAdapter that is used to configure basic
@@ -65,6 +67,9 @@ public class ManagementServerProperties implements SecurityPrerequisite {
 	 */
 	private Integer port;
 
+	@NestedConfigurationProperty
+	private Ssl ssl;
+
 	/**
 	 * Network address that the management endpoints should bind to.
 	 */
@@ -81,14 +86,7 @@ public class ManagementServerProperties implements SecurityPrerequisite {
 	 */
 	private boolean addApplicationContextHeader = true;
 
-	private final Security security = maybeCreateSecurity();
-
-	private Security maybeCreateSecurity() {
-		if (ClassUtils.isPresent(SECURITY_CHECK_CLASS, null)) {
-			return new Security();
-		}
-		return null;
-	}
+	private final Security security = new Security();
 
 	/**
 	 * Returns the management port or {@code null} if the
@@ -107,6 +105,14 @@ public class ManagementServerProperties implements SecurityPrerequisite {
 	 */
 	public void setPort(Integer port) {
 		this.port = port;
+	}
+
+	public Ssl getSsl() {
+		return this.ssl;
+	}
+
+	public void setSsl(Ssl ssl) {
+		this.ssl = ssl;
 	}
 
 	public InetAddress getAddress() {
@@ -160,12 +166,13 @@ public class ManagementServerProperties implements SecurityPrerequisite {
 		private boolean enabled = true;
 
 		/**
-		 * Role required to access the management endpoint.
+		 * Comma-separated list of roles that can access the management endpoint.
 		 */
-		private String role = "ADMIN";
+		private List<String> roles = Arrays.asList("ACTUATOR");
 
 		/**
-		 * Session creating policy to use (always, never, if_required, stateless).
+		 * Session creating policy for security use (always, never, if_required,
+		 * stateless).
 		 */
 		private SessionCreationPolicy sessions = SessionCreationPolicy.STATELESS;
 
@@ -177,12 +184,12 @@ public class ManagementServerProperties implements SecurityPrerequisite {
 			this.sessions = sessions;
 		}
 
-		public void setRole(String role) {
-			this.role = role;
+		public void setRoles(List<String> roles) {
+			this.roles = roles;
 		}
 
-		public String getRole() {
-			return this.role;
+		public List<String> getRoles() {
+			return this.roles;
 		}
 
 		public boolean isEnabled() {
@@ -192,6 +199,31 @@ public class ManagementServerProperties implements SecurityPrerequisite {
 		public void setEnabled(boolean enabled) {
 			this.enabled = enabled;
 		}
+
+	}
+
+	public enum SessionCreationPolicy {
+
+		/**
+		 * Always create an {@link HttpSession}.
+		 */
+		ALWAYS,
+
+		/**
+		 * Never create an {@link HttpSession}, but use any {@link HttpSession} that
+		 * already exists.
+		 */
+		NEVER,
+
+		/**
+		 * Only create an {@link HttpSession} if required.
+		 */
+		IF_REQUIRED,
+
+		/**
+		 * Never create an {@link HttpSession}.
+		 */
+		STATELESS
 
 	}
 

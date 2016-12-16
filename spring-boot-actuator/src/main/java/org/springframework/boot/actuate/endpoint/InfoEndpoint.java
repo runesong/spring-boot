@@ -16,7 +16,6 @@
 
 package org.springframework.boot.actuate.endpoint;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +32,7 @@ import org.springframework.util.Assert;
  * @author Stephane Nicoll
  */
 @ConfigurationProperties(prefix = "endpoints.info")
-public class InfoEndpoint extends AbstractEndpoint<Info> {
+public class InfoEndpoint extends AbstractEndpoint<Map<String, Object>> {
 
 	private final List<InfoContributor> infoContributors;
 
@@ -48,23 +47,13 @@ public class InfoEndpoint extends AbstractEndpoint<Info> {
 	}
 
 	@Override
-	public Info invoke() {
+	public Map<String, Object> invoke() {
 		Info.Builder builder = new Info.Builder();
 		for (InfoContributor contributor : this.infoContributors) {
 			contributor.contribute(builder);
 		}
-		builder.withDetails(getAdditionalInfo());
-		return builder.build();
-	}
-
-	/**
-	 * Return additional information to include in the output.
-	 * @return additional information
-	 * @deprecated define an additional {@link InfoContributor} bean instead.
-	 */
-	@Deprecated
-	protected Map<String, Object> getAdditionalInfo() {
-		return Collections.emptyMap();
+		Info build = builder.build();
+		return build.getDetails();
 	}
 
 }

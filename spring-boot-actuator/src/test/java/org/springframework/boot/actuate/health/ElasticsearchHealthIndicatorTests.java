@@ -23,21 +23,20 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchTimeoutException;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.client.AdminClient;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.ClusterAdminClient;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlocks;
+import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.MockitoAnnotations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
@@ -48,7 +47,6 @@ import static org.mockito.Matchers.any;
  *
  * @author Andy Wilkinson
  */
-@RunWith(MockitoJUnitRunner.class)
 public class ElasticsearchHealthIndicatorTests {
 
 	@Mock
@@ -66,9 +64,9 @@ public class ElasticsearchHealthIndicatorTests {
 
 	@Before
 	public void setUp() throws Exception {
+		MockitoAnnotations.initMocks(this);
 		given(this.client.admin()).willReturn(this.admin);
 		given(this.admin.cluster()).willReturn(this.cluster);
-
 		this.indicator = new ElasticsearchHealthIndicator(this.client, this.properties);
 	}
 
@@ -176,9 +174,9 @@ public class ElasticsearchHealthIndicatorTests {
 
 		private StubClusterHealthResponse(ClusterHealthStatus status) {
 			super("test-cluster", new String[0],
-					new ClusterState(null, 0, null, RoutingTable.builder().build(),
+					new ClusterState(null, 0, null, null, RoutingTable.builder().build(),
 							DiscoveryNodes.builder().build(),
-							ClusterBlocks.builder().build(), null));
+							ClusterBlocks.builder().build(), null, false));
 			this.status = status;
 		}
 

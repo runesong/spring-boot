@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,14 @@ import org.springframework.security.access.event.AuthorizationFailureEvent;
  * Default implementation of {@link AbstractAuthorizationAuditListener}.
  *
  * @author Dave Syer
+ * @author Vedran Pavic
  */
 public class AuthorizationAuditListener extends AbstractAuthorizationAuditListener {
+
+	/**
+	 * Authorization failure event type.
+	 */
+	public static final String AUTHORIZATION_FAILURE = "AUTHORIZATION_FAILURE";
 
 	@Override
 	public void onApplicationEvent(AbstractAuthorizationEvent event) {
@@ -47,15 +53,19 @@ public class AuthorizationAuditListener extends AbstractAuthorizationAuditListen
 		Map<String, Object> data = new HashMap<String, Object>();
 		data.put("type", event.getCredentialsNotFoundException().getClass().getName());
 		data.put("message", event.getCredentialsNotFoundException().getMessage());
-		publish(new AuditEvent("<unknown>", "AUTHENTICATION_FAILURE", data));
+		publish(new AuditEvent("<unknown>",
+				AuthenticationAuditListener.AUTHENTICATION_FAILURE, data));
 	}
 
 	private void onAuthorizationFailureEvent(AuthorizationFailureEvent event) {
 		Map<String, Object> data = new HashMap<String, Object>();
 		data.put("type", event.getAccessDeniedException().getClass().getName());
 		data.put("message", event.getAccessDeniedException().getMessage());
+		if (event.getAuthentication().getDetails() != null) {
+			data.put("details", event.getAuthentication().getDetails());
+		}
 		publish(new AuditEvent(event.getAuthentication().getName(),
-				"AUTHORIZATION_FAILURE", data));
+				AUTHORIZATION_FAILURE, data));
 	}
 
 }

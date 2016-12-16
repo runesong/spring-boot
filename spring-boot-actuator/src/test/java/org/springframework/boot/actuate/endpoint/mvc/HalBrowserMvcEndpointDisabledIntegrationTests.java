@@ -16,6 +16,7 @@
 
 package org.springframework.boot.actuate.endpoint.mvc;
 
+import com.google.common.net.HttpHeaders;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -23,19 +24,16 @@ import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.actuate.autoconfigure.MinimalActuatorHypermediaApplication;
-import org.springframework.boot.actuate.endpoint.mvc.HalBrowserMvcEndpointDisabledIntegrationTests.SpringBootHypermediaApplication;
-import org.springframework.boot.test.context.SpringApplicationConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
-import org.springframework.test.context.web.WebAppConfiguration;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -48,8 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * @author Andy Wilkinson
  */
 @RunWith(SpringRunner.class)
-@SpringApplicationConfiguration(SpringBootHypermediaApplication.class)
-@WebAppConfiguration
+@SpringBootTest
+@TestPropertySource(properties = "management.security.enabled=false")
 @DirtiesContext
 public class HalBrowserMvcEndpointDisabledIntegrationTests {
 
@@ -74,19 +72,17 @@ public class HalBrowserMvcEndpointDisabledIntegrationTests {
 	}
 
 	@Test
-	public void browser() throws Exception {
-		MvcResult response = this.mockMvc
-				.perform(get("/actuator/").accept(MediaType.TEXT_HTML))
-				.andExpect(status().isOk()).andReturn();
-		assertThat(response.getResponse().getForwardedUrl())
-				.isEqualTo("/actuator/browser.html");
+	public void browserRedirect() throws Exception {
+		this.mockMvc.perform(get("/actuator/").accept(MediaType.TEXT_HTML))
+				.andExpect(status().isFound()).andExpect(header().string(
+						HttpHeaders.LOCATION, "http://localhost/actuator/browser.html"));
 	}
 
 	@Test
 	public void endpointsDoNotHaveLinks() throws Exception {
 		for (MvcEndpoint endpoint : this.mvcEndpoints.getEndpoints()) {
 			String path = endpoint.getPath();
-			if ("/actuator".equals(path)) {
+			if ("/actuator".equals(path) || endpoint instanceof HeapdumpMvcEndpoint) {
 				continue;
 			}
 			path = path.length() > 0 ? path : "/";
@@ -102,7 +98,7 @@ public class HalBrowserMvcEndpointDisabledIntegrationTests {
 
 		public static void main(String[] args) {
 			SpringApplication.run(SpringBootHypermediaApplication.class,
-					new String[] { "--endpoints.hypermedia.enabled=false" });
+					"--endpoints.hypermedia.enabled=false");
 		}
 
 	}

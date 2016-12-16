@@ -20,9 +20,13 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
+import javax.servlet.ServletException;
 
 import org.apache.catalina.Container;
 import org.apache.catalina.Context;
@@ -30,12 +34,15 @@ import org.apache.catalina.LifecycleEvent;
 import org.apache.catalina.LifecycleListener;
 import org.apache.catalina.LifecycleState;
 import org.apache.catalina.Service;
+import org.apache.catalina.SessionIdGenerator;
 import org.apache.catalina.Valve;
-import org.apache.catalina.Wrapper;
 import org.apache.catalina.connector.Connector;
+import org.apache.catalina.core.StandardWrapper;
 import org.apache.catalina.startup.Tomcat;
+import org.apache.catalina.util.CharsetMapper;
 import org.apache.catalina.valves.RemoteIpValve;
-import org.apache.coyote.http11.AbstractHttp11JsseProtocol;
+import org.apache.jasper.servlet.JspServlet;
+import org.apache.tomcat.util.net.SSLHostConfig;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -263,16 +270,14 @@ public class TomcatEmbeddedServletContainerFactoryTests
 		Tomcat tomcat = getTomcat(factory);
 		Connector connector = tomcat.getConnector();
 
-		AbstractHttp11JsseProtocol<?> jsseProtocol = (AbstractHttp11JsseProtocol<?>) connector
-				.getProtocolHandler();
-		assertThat(jsseProtocol.getCiphers()).isEqualTo("ALPHA,BRAVO,CHARLIE");
+		SSLHostConfig[] sslHostConfigs = connector.getProtocolHandler()
+				.findSslHostConfigs();
+		assertThat(sslHostConfigs[0].getCiphers()).isEqualTo("ALPHA:BRAVO:CHARLIE");
 	}
 
 	@Test
 	public void sslEnabledMultipleProtocolsConfiguration() throws Exception {
-		Ssl ssl = new Ssl();
-		ssl.setKeyStore("test.jks");
-		ssl.setKeyStorePassword("secret");
+		Ssl ssl = getSsl(null, "password", "src/test/resources/test.jks");
 		ssl.setEnabledProtocols(new String[] { "TLSv1.1", "TLSv1.2" });
 		ssl.setCiphers(new String[] { "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256", "BRAVO" });
 
@@ -281,21 +286,20 @@ public class TomcatEmbeddedServletContainerFactoryTests
 
 		this.container = factory
 				.getEmbeddedServletContainer(sessionServletRegistration());
+		this.container.start();
 		Tomcat tomcat = ((TomcatEmbeddedServletContainer) this.container).getTomcat();
 		Connector connector = tomcat.getConnector();
 
-		AbstractHttp11JsseProtocol<?> jsseProtocol = (AbstractHttp11JsseProtocol<?>) connector
-				.getProtocolHandler();
-		assertThat(jsseProtocol.getSslProtocol()).isEqualTo("TLS");
-		assertThat(jsseProtocol.getProperty("sslEnabledProtocols"))
-				.isEqualTo("TLSv1.1,TLSv1.2");
+		SSLHostConfig sslHostConfig = connector.getProtocolHandler()
+				.findSslHostConfigs()[0];
+		assertThat(sslHostConfig.getSslProtocol()).isEqualTo("TLS");
+		assertThat(sslHostConfig.getEnabledProtocols())
+				.containsExactlyInAnyOrder("TLSv1.1", "TLSv1.2");
 	}
 
 	@Test
 	public void sslEnabledProtocolsConfiguration() throws Exception {
-		Ssl ssl = new Ssl();
-		ssl.setKeyStore("test.jks");
-		ssl.setKeyStorePassword("secret");
+		Ssl ssl = getSsl(null, "password", "src/test/resources/test.jks");
 		ssl.setEnabledProtocols(new String[] { "TLSv1.2" });
 		ssl.setCiphers(new String[] { "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256", "BRAVO" });
 
@@ -307,21 +311,20 @@ public class TomcatEmbeddedServletContainerFactoryTests
 		Tomcat tomcat = ((TomcatEmbeddedServletContainer) this.container).getTomcat();
 		Connector connector = tomcat.getConnector();
 
-		AbstractHttp11JsseProtocol<?> jsseProtocol = (AbstractHttp11JsseProtocol<?>) connector
-				.getProtocolHandler();
-		assertThat(jsseProtocol.getSslProtocol()).isEqualTo("TLS");
-		assertThat(jsseProtocol.getProperty("sslEnabledProtocols")).isEqualTo("TLSv1.2");
+		this.container.start();
+		SSLHostConfig sslHostConfig = connector.getProtocolHandler()
+				.findSslHostConfigs()[0];
+		assertThat(sslHostConfig.getSslProtocol()).isEqualTo("TLS");
+		assertThat(sslHostConfig.getEnabledProtocols()).containsExactly("TLSv1.2");
 	}
 
 	@Test
 	public void primaryConnectorPortClashThrowsIllegalStateException()
 			throws InterruptedException, IOException {
-		final int port = SocketUtils.findAvailableTcpPort(40000);
-
-		doWithBlockedPort(port, new Runnable() {
+		doWithBlockedPort(new BlockedPortAction() {
 
 			@Override
-			public void run() {
+			public void run(int port) {
 				TomcatEmbeddedServletContainerFactory factory = getFactory();
 				factory.setPort(port);
 
@@ -337,7 +340,6 @@ public class TomcatEmbeddedServletContainerFactoryTests
 			}
 
 		});
-
 	}
 
 	@Test
@@ -356,17 +358,6 @@ public class TomcatEmbeddedServletContainerFactoryTests
 		connector.setPort(port);
 		((TomcatEmbeddedServletContainerFactory) factory)
 				.addAdditionalTomcatConnectors(connector);
-	}
-
-	@Test
-	public void jspServletInitParameters() {
-		Map<String, String> initParameters = new HashMap<String, String>();
-		initParameters.put("a", "alpha");
-		TomcatEmbeddedServletContainerFactory factory = getFactory();
-		factory.getJspServlet().setInitParameters(initParameters);
-		this.container = factory.getEmbeddedServletContainer();
-		Wrapper jspServlet = getJspServlet();
-		assertThat(jspServlet.findInitParameter("a")).isEqualTo("alpha");
 	}
 
 	@Test
@@ -393,30 +384,80 @@ public class TomcatEmbeddedServletContainerFactoryTests
 				.getEmbeddedServletContainer(sessionServletRegistration());
 		this.container.start();
 		String s3 = getResponse(getLocalUrl("/session"));
-		System.out.println(s1);
-		System.out.println(s2);
-		System.out.println(s3);
 		String message = "Session error s1=" + s1 + " s2=" + s2 + " s3=" + s3;
 		assertThat(s2.split(":")[0]).as(message).isEqualTo(s1.split(":")[1]);
 		assertThat(s3.split(":")[0]).as(message).isNotEqualTo(s2.split(":")[1]);
 	}
 
 	@Test
-	public void tcclOfMainThreadIsTomcatWebAppClassLoader() {
+	public void jndiLookupsCanBePerformedDuringApplicationContextRefresh()
+			throws NamingException {
 		Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
+		TomcatEmbeddedServletContainerFactory factory = new TomcatEmbeddedServletContainerFactory(
+				0) {
+
+			@Override
+			protected TomcatEmbeddedServletContainer getTomcatEmbeddedServletContainer(
+					Tomcat tomcat) {
+				tomcat.enableNaming();
+				return super.getTomcatEmbeddedServletContainer(tomcat);
+			}
+
+		};
+
+		// Container is created in onRefresh
+		this.container = factory.getEmbeddedServletContainer();
+
+		// Lookups should now be possible
+		new InitialContext().lookup("java:comp/env");
+
+		// Called in finishRefresh, giving us an opportunity to remove the context binding
+		// and avoid a leak
+		this.container.start();
+
+		// Lookups should no longer be possible
+		this.thrown.expect(NamingException.class);
+		new InitialContext().lookup("java:comp/env");
+	}
+
+	@Test
+	public void defaultLocaleCharsetMappingsAreOverriden() throws Exception {
 		TomcatEmbeddedServletContainerFactory factory = getFactory();
 		this.container = factory.getEmbeddedServletContainer();
-		this.container.start();
-		assertThat(Thread.currentThread().getContextClassLoader())
-				.isInstanceOf(TomcatEmbeddedWebappClassLoader.class);
-		this.container.stop();
+		// override defaults, see org.apache.catalina.util.CharsetMapperDefault.properties
+		assertThat(getCharset(Locale.ENGLISH).toString()).isEqualTo("UTF-8");
+		assertThat(getCharset(Locale.FRENCH).toString()).isEqualTo("UTF-8");
+	}
+
+	@Test
+	public void sessionIdGeneratorIsConfiguredWithAttributesFromTheManager() {
+		System.setProperty("jvmRoute", "test");
+		try {
+			TomcatEmbeddedServletContainerFactory factory = getFactory();
+			this.container = factory.getEmbeddedServletContainer();
+			this.container.start();
+		}
+		finally {
+			System.clearProperty("jvmRoute");
+		}
+		Tomcat tomcat = ((TomcatEmbeddedServletContainer) this.container).getTomcat();
+		Context context = (Context) tomcat.getHost().findChildren()[0];
+		SessionIdGenerator sessionIdGenerator = context.getManager()
+				.getSessionIdGenerator();
+		assertThat(sessionIdGenerator).isInstanceOf(LazySessionIdGenerator.class);
+		assertThat(sessionIdGenerator.getJvmRoute()).isEqualTo("test");
 	}
 
 	@Override
-	protected Wrapper getJspServlet() {
+	protected JspServlet getJspServlet() throws ServletException {
 		Container context = ((TomcatEmbeddedServletContainer) this.container).getTomcat()
 				.getHost().findChildren()[0];
-		return (Wrapper) context.findChild("jsp");
+		StandardWrapper standardWrapper = (StandardWrapper) context.findChild("jsp");
+		if (standardWrapper == null) {
+			return null;
+		}
+		standardWrapper.load();
+		return (JspServlet) standardWrapper.getServlet();
 	}
 
 	@SuppressWarnings("unchecked")
@@ -426,6 +467,15 @@ public class TomcatEmbeddedServletContainerFactoryTests
 				.getTomcat().getHost().findChildren()[0];
 		return (Map<String, String>) ReflectionTestUtils.getField(context,
 				"mimeMappings");
+	}
+
+	@Override
+	protected Charset getCharset(Locale locale) {
+		Context context = (Context) ((TomcatEmbeddedServletContainer) this.container)
+				.getTomcat().getHost().findChildren()[0];
+		CharsetMapper mapper = ((TomcatEmbeddedContext) context).getCharsetMapper();
+		String charsetName = mapper.getCharset(locale);
+		return (charsetName != null) ? Charset.forName(charsetName) : null;
 	}
 
 	private void assertTimeout(TomcatEmbeddedServletContainerFactory factory,
@@ -438,6 +488,13 @@ public class TomcatEmbeddedServletContainerFactoryTests
 	private Tomcat getTomcat(TomcatEmbeddedServletContainerFactory factory) {
 		this.container = factory.getEmbeddedServletContainer();
 		return ((TomcatEmbeddedServletContainer) this.container).getTomcat();
+	}
+
+	@Override
+	protected void handleExceptionCausedByBlockedPort(RuntimeException ex,
+			int blockedPort) {
+		assertThat(ex).isInstanceOf(ConnectorStartFailedException.class);
+		assertThat(((ConnectorStartFailedException) ex).getPort()).isEqualTo(blockedPort);
 	}
 
 }

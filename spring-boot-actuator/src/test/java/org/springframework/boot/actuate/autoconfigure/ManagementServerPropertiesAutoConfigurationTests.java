@@ -16,7 +16,11 @@
 
 package org.springframework.boot.actuate.autoconfigure;
 
+import org.junit.After;
 import org.junit.Test;
+
+import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,6 +31,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Stephane Nicoll
  */
 public class ManagementServerPropertiesAutoConfigurationTests {
+
+	private AnnotationConfigApplicationContext context;
+
+	@After
+	public void close() {
+		if (this.context != null) {
+			this.context.close();
+		}
+	}
 
 	@Test
 	public void defaultManagementServerProperties() {
@@ -56,6 +69,28 @@ public class ManagementServerPropertiesAutoConfigurationTests {
 		ManagementServerProperties properties = new ManagementServerProperties();
 		properties.setContextPath("/");
 		assertThat(properties.getContextPath()).isEqualTo("");
+	}
+
+	@Test
+	public void managementRolesSetMultipleRoles() {
+		ManagementServerProperties properties = load(
+				"management.security.roles=FOO,BAR,BIZ");
+		assertThat(properties.getSecurity().getRoles()).containsOnly("FOO", "BAR", "BIZ");
+	}
+
+	@Test
+	public void managementRolesAllowsIndexedAccess() {
+		ManagementServerProperties properties = load("management.security.roles[0]=FOO");
+		assertThat(properties.getSecurity().getRoles()).containsOnly("FOO");
+	}
+
+	public ManagementServerProperties load(String... environment) {
+		AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+		EnvironmentTestUtils.addEnvironment(ctx, environment);
+		ctx.register(ManagementServerPropertiesAutoConfiguration.class);
+		ctx.refresh();
+		this.context = ctx;
+		return this.context.getBean(ManagementServerProperties.class);
 	}
 
 }

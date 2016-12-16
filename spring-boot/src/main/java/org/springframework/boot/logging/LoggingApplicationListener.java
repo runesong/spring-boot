@@ -28,8 +28,9 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.bind.RelaxedPropertyResolver;
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
+import org.springframework.boot.context.event.ApplicationFailedEvent;
 import org.springframework.boot.context.event.ApplicationPreparedEvent;
-import org.springframework.boot.context.event.ApplicationStartedEvent;
+import org.springframework.boot.context.event.ApplicationStartingEvent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
@@ -49,6 +50,12 @@ import org.springframework.util.StringUtils;
  * environment contains a {@code logging.config} property it will be used to bootstrap the
  * logging system, otherwise a default configuration is used. Regardless, logging levels
  * will be customized if the environment contains {@code logging.level.*} entries.
+ * <p>
+ * Debug and trace logging for Spring, Tomcat, Jetty and Hibernate will be enabled when
+ * the environment contains {@code debug} or {@code trace} properties that aren't set to
+ * {@code "false"} (i.e. if you start your application using
+ * {@literal java -jar myapp.jar [--debug | --trace]}). If you prefer to ignore these
+ * properties you can set {@link #setParseArgs(boolean) parseArgs} to {@code false}.
  * <p>
  * By default, log output is only written to the console. If a log file is required the
  * {@code logging.path} and {@code logging.file} properties can be used.
@@ -91,23 +98,25 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 	 * The name of the Spring property that contains the directory where log files are
 	 * written.
 	 */
+	@Deprecated
 	public static final String PATH_PROPERTY = LogFile.PATH_PROPERTY;
 
 	/**
 	 * The name of the Spring property that contains the name of the log file. Names can
 	 * be an exact location or relative to the current directory.
 	 */
+	@Deprecated
 	public static final String FILE_PROPERTY = LogFile.FILE_PROPERTY;
 
 	/**
 	 * The name of the System property that contains the process ID.
 	 */
-	public static final String PID_KEY = LoggingSystemProperties.PID_KEY;
+	public static final String PID_KEY = "PID";
 
 	/**
 	 * The name of the System property that contains the exception conversion word.
 	 */
-	public static final String EXCEPTION_CONVERSION_WORD = LoggingSystemProperties.EXCEPTION_CONVERSION_WORD;
+	public static final String EXCEPTION_CONVERSION_WORD = "LOG_EXCEPTION_CONVERSION_WORD";
 
 	/**
 	 * The name of the System property that contains the log file.
@@ -122,17 +131,17 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 	/**
 	 * The name of the System property that contains the console log pattern.
 	 */
-	public static final String CONSOLE_LOG_PATTERN = LoggingSystemProperties.CONSOLE_LOG_PATTERN;
+	public static final String CONSOLE_LOG_PATTERN = "CONSOLE_LOG_PATTERN";
 
 	/**
 	 * The name of the System property that contains the file log pattern.
 	 */
-	public static final String FILE_LOG_PATTERN = LoggingSystemProperties.FILE_LOG_PATTERN;
+	public static final String FILE_LOG_PATTERN = "FILE_LOG_PATTERN";
 
 	/**
 	 * The name of the System property that contains the log level pattern.
 	 */
-	public static final String LOG_LEVEL_PATTERN = LoggingSystemProperties.LOG_LEVEL_PATTERN;
+	public static final String LOG_LEVEL_PATTERN = "LOG_LEVEL_PATTERN";
 
 	/**
 	 * The name of the {@link LoggingSystem} bean.
@@ -154,7 +163,7 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 		LOG_LEVEL_LOGGERS.add(LogLevel.DEBUG, "org.hibernate.SQL");
 	}
 
-	private static Class<?>[] EVENT_TYPES = { ApplicationStartedEvent.class,
+	private static Class<?>[] EVENT_TYPES = { ApplicationStartingEvent.class,
 			ApplicationEnvironmentPreparedEvent.class, ApplicationPreparedEvent.class,
 			ContextClosedEvent.class };
 
@@ -194,8 +203,8 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 
 	@Override
 	public void onApplicationEvent(ApplicationEvent event) {
-		if (event instanceof ApplicationStartedEvent) {
-			onApplicationStartedEvent((ApplicationStartedEvent) event);
+		if (event instanceof ApplicationStartingEvent) {
+			onApplicationStartingEvent((ApplicationStartingEvent) event);
 		}
 		else if (event instanceof ApplicationEnvironmentPreparedEvent) {
 			onApplicationEnvironmentPreparedEvent(
@@ -208,9 +217,12 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 				.getApplicationContext().getParent() == null) {
 			onContextClosedEvent();
 		}
+		else if (event instanceof ApplicationFailedEvent) {
+			onApplicationFailedEvent();
+		}
 	}
 
-	private void onApplicationStartedEvent(ApplicationStartedEvent event) {
+	private void onApplicationStartingEvent(ApplicationStartingEvent event) {
 		this.loggingSystem = LoggingSystem
 				.get(event.getSpringApplication().getClassLoader());
 		this.loggingSystem.beforeInitialize();
@@ -234,6 +246,12 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 	}
 
 	private void onContextClosedEvent() {
+		if (this.loggingSystem != null) {
+			this.loggingSystem.cleanUp();
+		}
+	}
+
+	private void onApplicationFailedEvent() {
 		if (this.loggingSystem != null) {
 			this.loggingSystem.cleanUp();
 		}
@@ -334,7 +352,7 @@ public class LoggingApplicationListener implements GenericApplicationListener {
 	private void setLogLevel(LoggingSystem system, Environment environment, String name,
 			String level) {
 		try {
-			if (name.equalsIgnoreCase("root")) {
+			if (name.equalsIgnoreCase(LoggingSystem.ROOT_LOGGER_NAME)) {
 				name = null;
 			}
 			level = environment.resolvePlaceholders(level);
