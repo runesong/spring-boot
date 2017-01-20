@@ -24,9 +24,11 @@ import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.web.ErrorAttributes;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.CoreMatchers.isA;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -48,6 +50,9 @@ public class WebMvcTestAllControllersIntegrationTests {
 	@Autowired
 	private MockMvc mvc;
 
+	@Autowired(required = false)
+	private ErrorAttributes errorAttributes;
+
 	@Test
 	public void shouldFindController1() throws Exception {
 		this.mvc.perform(get("/one")).andExpect(content().string("one"))
@@ -68,8 +73,7 @@ public class WebMvcTestAllControllersIntegrationTests {
 
 	@Test
 	public void shouldRunValidationSuccess() throws Exception {
-		this.mvc.perform(get("/three/OK"))
-				.andExpect(status().isOk())
+		this.mvc.perform(get("/three/OK")).andExpect(status().isOk())
 				.andExpect(content().string("Hello OK"));
 	}
 
@@ -77,6 +81,12 @@ public class WebMvcTestAllControllersIntegrationTests {
 	public void shouldRunValidationFailure() throws Exception {
 		this.thrown.expectCause(isA(ConstraintViolationException.class));
 		this.mvc.perform(get("/three/invalid"));
+	}
+
+	@Test
+	public void shouldNotFilterErrorAttributes() throws Exception {
+		assertThat(this.errorAttributes).isNotNull();
+
 	}
 
 }

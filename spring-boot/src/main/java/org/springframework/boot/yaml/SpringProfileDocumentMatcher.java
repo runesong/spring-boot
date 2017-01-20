@@ -122,7 +122,9 @@ public class SpringProfileDocumentMatcher implements DocumentMatcher {
 	 * Profile match types.
 	 */
 	enum ProfileType {
+
 		POSITIVE, NEGATIVE
+
 	}
 
 	/**
@@ -142,7 +144,7 @@ public class SpringProfileDocumentMatcher implements DocumentMatcher {
 	}
 
 	/**
-	 * {@link ProfileMatcher} that matches when a value in {@code spring.profiles} is also
+	 * {@link ProfilesMatcher} that matches when a value in {@code spring.profiles} is also
 	 * in {@code spring.profiles.active}.
 	 */
 	private static class ActiveProfilesMatcher extends ProfilesMatcher {

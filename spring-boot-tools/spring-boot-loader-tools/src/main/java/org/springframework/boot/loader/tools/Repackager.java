@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -125,8 +125,8 @@ public class Repackager {
 
 	/**
 	 * Sets the layout factory for the jar. The factory can be used when no specific
-	 * layout is specific.
-	 * @param layoutFactory the layoutFactory to set
+	 * layout is specified.
+	 * @param layoutFactory the layout factory to set
 	 */
 	public void setLayoutFactory(LayoutFactory layoutFactory) {
 		this.layoutFactory = layoutFactory;
@@ -431,7 +431,8 @@ public class Repackager {
 			if (entry.getName().equals("META-INF/INDEX.LIST")) {
 				return null;
 			}
-			if (entry.getName().startsWith("META-INF/")
+			if ((entry.getName().startsWith("META-INF/")
+					&& !entry.getName().equals("META-INF/aop.xml"))
 					|| entry.getName().startsWith("BOOT-INF/")) {
 				return entry;
 			}

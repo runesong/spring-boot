@@ -34,7 +34,7 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.web.authentication.switchuser.AuthenticationSwitchUserEvent;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Matchers.anyObject;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -68,7 +68,7 @@ public class AuthenticationAuditListenerTests {
 		this.listener.onApplicationEvent(new InteractiveAuthenticationSuccessEvent(
 				new UsernamePasswordAuthenticationToken("user", "password"), getClass()));
 		// No need to audit this one (it shadows a regular AuthenticationSuccessEvent)
-		verify(this.publisher, never()).publishEvent((ApplicationEvent) anyObject());
+		verify(this.publisher, never()).publishEvent((ApplicationEvent) any());
 	}
 
 	@Test
@@ -86,8 +86,8 @@ public class AuthenticationAuditListenerTests {
 		AuditApplicationEvent event = handleAuthenticationEvent(
 				new AuthenticationSwitchUserEvent(
 						new UsernamePasswordAuthenticationToken("user", "password"),
-						new User("user", "password",
-								AuthorityUtils.commaSeparatedStringToAuthorityList("USER"))));
+						new User("user", "password", AuthorityUtils
+								.commaSeparatedStringToAuthorityList("USER"))));
 		assertThat(event.getAuditEvent().getType())
 				.isEqualTo(AuthenticationAuditListener.AUTHENTICATION_SWITCH);
 	}
@@ -98,12 +98,12 @@ public class AuthenticationAuditListenerTests {
 		UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
 				"user", "password");
 		authentication.setDetails(details);
-		AuditApplicationEvent event = handleAuthenticationEvent(new AuthenticationFailureExpiredEvent(
-				authentication, new BadCredentialsException("Bad user")));
+		AuditApplicationEvent event = handleAuthenticationEvent(
+				new AuthenticationFailureExpiredEvent(authentication,
+						new BadCredentialsException("Bad user")));
 		assertThat(event.getAuditEvent().getType())
 				.isEqualTo(AuthenticationAuditListener.AUTHENTICATION_FAILURE);
-		assertThat(event.getAuditEvent().getData())
-				.containsEntry("details", details);
+		assertThat(event.getAuditEvent().getData()).containsEntry("details", details);
 	}
 
 	private AuditApplicationEvent handleAuthenticationEvent(

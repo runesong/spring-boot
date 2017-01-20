@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,11 +26,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.PostConstruct;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
 import javax.servlet.SessionCookieConfig;
 import javax.servlet.SessionTrackingMode;
-import javax.validation.constraints.NotNull;
 
 import io.undertow.Undertow.Builder;
 import io.undertow.UndertowOptions;
@@ -74,6 +74,7 @@ import org.springframework.boot.web.servlet.ServletContextInitializer;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.Environment;
+import org.springframework.util.Assert;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
@@ -122,7 +123,6 @@ public class ServerProperties
 	/**
 	 * Path of the main dispatcher servlet.
 	 */
-	@NotNull
 	private String servletPath = "/";
 
 	/**
@@ -170,6 +170,11 @@ public class ServerProperties
 	private final Undertow undertow = new Undertow();
 
 	private Environment environment;
+
+	@PostConstruct
+	private void validate() {
+		Assert.notNull(this.servletPath, "ServletPath must not be null");
+	}
 
 	@Override
 	public int getOrder() {
@@ -1535,6 +1540,7 @@ public class ServerProperties
 			public void setRotate(boolean rotate) {
 				this.rotate = rotate;
 			}
+
 		}
 
 	}
@@ -1586,4 +1592,5 @@ public class ServerProperties
 		}
 
 	}
+
 }

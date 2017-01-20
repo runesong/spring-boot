@@ -128,7 +128,7 @@ public class EndpointMBeanExporterTests {
 		this.context.registerBeanDefinition("endpoint1",
 				new RootBeanDefinition(TestEndpoint.class));
 		this.context.registerBeanDefinition("endpoint2",
-				new RootBeanDefinition(TestEndpoint.class));
+				new RootBeanDefinition(TestEndpoint2.class));
 		this.context.refresh();
 		MBeanExporter mbeanExporter = this.context.getBean(EndpointMBeanExporter.class);
 		assertThat(mbeanExporter.getServer()
@@ -269,8 +269,8 @@ public class EndpointMBeanExporterTests {
 		MBeanExporter mbeanExporter = registerLoggersEndpoint();
 		Object response = mbeanExporter.getServer().invoke(
 				getObjectName("loggersEndpoint", this.context), "setLogLevel",
-				new Object[]{"com.example", "trace"},
-				new String[]{String.class.getName(), String.class.getName()});
+				new Object[] { "com.example", "trace" },
+				new String[] { String.class.getName(), String.class.getName() });
 		assertThat(response).isNull();
 	}
 
@@ -280,10 +280,9 @@ public class EndpointMBeanExporterTests {
 		this.thrown.expect(MBeanException.class);
 		this.thrown.expectCause(hasMessage(containsString("No enum constant")));
 		this.thrown.expectCause(hasMessage(containsString("LogLevel.INVALID")));
-		mbeanExporter.getServer().invoke(
-				getObjectName("loggersEndpoint", this.context), "setLogLevel",
-				new Object[]{"com.example", "invalid"},
-				new String[]{String.class.getName(), String.class.getName()});
+		mbeanExporter.getServer().invoke(getObjectName("loggersEndpoint", this.context),
+				"setLogLevel", new Object[] { "com.example", "invalid" },
+				new String[] { String.class.getName(), String.class.getName() });
 	}
 
 	private MBeanExporter registerLoggersEndpoint() {
@@ -327,6 +326,10 @@ public class EndpointMBeanExporterTests {
 		public String invoke() {
 			return "hello world";
 		}
+
+	}
+
+	public static class TestEndpoint2 extends TestEndpoint {
 
 	}
 

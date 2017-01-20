@@ -17,11 +17,17 @@
 package org.springframework.boot.actuate.endpoint.mvc;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.util.StringUtils;
 import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.handler.HandlerInterceptorAdapter;
@@ -34,9 +40,14 @@ import org.springframework.web.servlet.handler.HandlerInterceptorAdapter;
  */
 public class MvcEndpointSecurityInterceptor extends HandlerInterceptorAdapter {
 
+	private static final Log logger = LogFactory
+			.getLog(MvcEndpointSecurityInterceptor.class);
+
 	private final boolean secure;
 
 	private final List<String> roles;
+
+	private AtomicBoolean loggedUnauthorizedAttempt = new AtomicBoolean();
 
 	public MvcEndpointSecurityInterceptor(boolean secure, List<String> roles) {
 		this.secure = secure;
@@ -50,6 +61,10 @@ public class MvcEndpointSecurityInterceptor extends HandlerInterceptorAdapter {
 			return true;
 		}
 		HandlerMethod handlerMethod = (HandlerMethod) handler;
+		if (HttpMethod.OPTIONS.matches(request.getMethod())
+				&& !(handlerMethod.getBean() instanceof MvcEndpoint)) {
+			return true;
+		}
 		MvcEndpoint mvcEndpoint = (MvcEndpoint) handlerMethod.getBean();
 		if (!mvcEndpoint.isSensitive()) {
 			return true;
@@ -59,17 +74,30 @@ public class MvcEndpointSecurityInterceptor extends HandlerInterceptorAdapter {
 				return true;
 			}
 		}
-		setFailureResponseStatus(request, response);
+		sendFailureResponse(request, response);
 		return false;
 	}
 
-	private void setFailureResponseStatus(HttpServletRequest request,
-			HttpServletResponse response) {
+	private void sendFailureResponse(HttpServletRequest request,
+			HttpServletResponse response) throws Exception {
 		if (request.getUserPrincipal() != null) {
-			response.setStatus(HttpStatus.FORBIDDEN.value());
+			String roles = StringUtils.collectionToDelimitedString(this.roles, " ");
+			response.sendError(HttpStatus.FORBIDDEN.value(),
+					"Access is denied. User must have one of the these roles: " + roles);
 		}
 		else {
-			response.setStatus(HttpStatus.UNAUTHORIZED.value());
+			logUnauthorizedAttempt();
+			response.sendError(HttpStatus.UNAUTHORIZED.value(),
+					"Full authentication is required to access this resource.");
+		}
+	}
+
+	private void logUnauthorizedAttempt() {
+		if (this.loggedUnauthorizedAttempt.compareAndSet(false, true)
+				&& logger.isInfoEnabled()) {
+			logger.info("Full authentication is required to access "
+					+ "actuator endpoints. Consider adding Spring Security "
+					+ "or set 'management.security.enabled' to false.");
 		}
 	}
 

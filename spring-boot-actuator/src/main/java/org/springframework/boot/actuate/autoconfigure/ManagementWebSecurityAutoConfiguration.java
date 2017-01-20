@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -100,9 +100,9 @@ public class ManagementWebSecurityAutoConfiguration {
 	@Bean
 	public IgnoredRequestCustomizer managementIgnoredRequestCustomizer(
 			ManagementServerProperties management,
-			ObjectProvider<ManagementContextResolver> contextResolverProvider) {
+			ObjectProvider<ManagementContextResolver> contextResolver) {
 		return new ManagementIgnoredRequestCustomizer(management,
-				contextResolverProvider.getIfAvailable());
+				contextResolver.getIfAvailable());
 	}
 
 	private class ManagementIgnoredRequestCustomizer implements IgnoredRequestCustomizer {
@@ -126,28 +126,30 @@ public class ManagementWebSecurityAutoConfiguration {
 			}
 
 		}
+
 	}
 
 	@Configuration
 	protected static class ManagementSecurityPropertiesConfiguration
 			implements SecurityPrerequisite {
 
-		private final SecurityProperties security;
+		private final SecurityProperties securityProperties;
 
-		private final ManagementServerProperties management;
+		private final ManagementServerProperties managementServerProperties;
 
 		public ManagementSecurityPropertiesConfiguration(
-				ObjectProvider<SecurityProperties> securityProvider,
-				ObjectProvider<ManagementServerProperties> managementProvider) {
-			this.security = securityProvider.getIfAvailable();
-			this.management = managementProvider.getIfAvailable();
+				ObjectProvider<SecurityProperties> securityProperties,
+				ObjectProvider<ManagementServerProperties> managementServerProperties) {
+			this.securityProperties = securityProperties.getIfAvailable();
+			this.managementServerProperties = managementServerProperties.getIfAvailable();
 		}
 
 		@PostConstruct
 		public void init() {
-			if (this.management != null && this.security != null) {
-				this.security.getUser().getRole()
-						.addAll(this.management.getSecurity().getRoles());
+			if (this.managementServerProperties != null
+					&& this.securityProperties != null) {
+				this.securityProperties.getUser().getRole()
+						.addAll(this.managementServerProperties.getSecurity().getRoles());
 			}
 		}
 
@@ -158,6 +160,7 @@ public class ManagementWebSecurityAutoConfiguration {
 	@Conditional(WebSecurityEnablerCondition.class)
 	@EnableWebSecurity
 	protected static class WebSecurityEnabler extends AuthenticationManagerConfiguration {
+
 	}
 
 	/**
@@ -198,10 +201,10 @@ public class ManagementWebSecurityAutoConfiguration {
 
 		public ManagementWebSecurityConfigurerAdapter(SecurityProperties security,
 				ManagementServerProperties management,
-				ObjectProvider<ManagementContextResolver> contextResolverProvider) {
+				ObjectProvider<ManagementContextResolver> contextResolver) {
 			this.security = security;
 			this.management = management;
-			this.contextResolver = contextResolverProvider.getIfAvailable();
+			this.contextResolver = contextResolver.getIfAvailable();
 		}
 
 		@Override
@@ -254,10 +257,11 @@ public class ManagementWebSecurityAutoConfiguration {
 
 		private void configurePermittedRequests(
 				ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry requests) {
+			requests.requestMatchers(new LazyEndpointPathRequestMatcher(
+					this.contextResolver, EndpointPaths.SENSITIVE)).authenticated();
 			// Permit access to the non-sensitive endpoints
 			requests.requestMatchers(new LazyEndpointPathRequestMatcher(
 					this.contextResolver, EndpointPaths.NON_SENSITIVE)).permitAll();
-			requests.anyRequest().authenticated();
 		}
 
 	}
@@ -273,6 +277,15 @@ public class ManagementWebSecurityAutoConfiguration {
 				return !endpoint.isSensitive();
 			}
 
+		},
+
+		SENSITIVE {
+
+			@Override
+			protected boolean isIncluded(MvcEndpoint endpoint) {
+				return endpoint.isSensitive();
+			}
+
 		};
 
 		public String[] getPaths(EndpointHandlerMapping endpointHandlerMapping) {
@@ -286,12 +299,9 @@ public class ManagementWebSecurityAutoConfiguration {
 					String path = endpointHandlerMapping.getPath(endpoint.getPath());
 					paths.add(path);
 					if (!path.equals("")) {
-						if (endpoint.isSensitive()) {
-							// Ensure that nested paths are secured
-							paths.add(path + "/**");
-							// Add Spring MVC-generated additional paths
-							paths.add(path + ".*");
-						}
+						paths.add(path + "/**");
+						// Add Spring MVC-generated additional paths
+						paths.add(path + ".*");
 					}
 					paths.add(path + "/");
 				}
